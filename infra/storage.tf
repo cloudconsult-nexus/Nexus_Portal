@@ -1,14 +1,12 @@
 # Shared storage for every user-supplied image asset — org logos AND person
 # profile photos both land here via backend/src/lib/storage.js's uploadAsset()
 # (BRANDING_BUCKET_NAME wiring in cloudrun.tf; the name predates photos being
-# added). Public read is intentional and scoped to just this bucket (not
-# project-wide): both asset types render in unauthenticated <img> tags across
-# the portal — logos for white-labeling (including a customer's own end
-# users), photos in avatars throughout the app. Object names are
-# UUID-suffixed (assetKey() in storage.js), so nothing is guessable even
-# though nothing requires auth to fetch — see DEPLOYMENT_ARCHITECTURE.md for
-# the full tradeoff writeup. Split into a separate private bucket with signed
-# URLs if photos need to stop being publicly fetchable later.
+# added). Private bucket, no public-read grant (see iam.tf's api_signer) —
+# the API signs a short-lived V4 URL per request instead
+# (backend/src/lib/storage.js's resolveAssetUrl()), which works regardless of
+# the deploying org's IAM policy. Object names are also UUID-suffixed
+# (assetKey() in storage.js) as defense in depth. See
+# DEPLOYMENT_ARCHITECTURE.md for the full design writeup.
 #
 # Versioning + the lifecycle rule below are a backup safeguard against
 # accidental overwrite/delete (assetKey() always writes a new UUID-named

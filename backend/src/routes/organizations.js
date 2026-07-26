@@ -6,7 +6,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { requireRole } from '../middleware/rbac.js';
 import { auditContext } from '../middleware/audit.js';
 import { getEffectiveBranding } from '../lib/branding.js';
-import { assetKey, uploadAsset } from '../lib/storage.js';
+import { assetKey, uploadAsset, resolveAssetUrl } from '../lib/storage.js';
 
 // Customers (flat — no more hierarchy levels/parent nesting; see
 // migrations/013_tas_customer_model.sql). Kept on the `organizations`
@@ -16,6 +16,17 @@ const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 router.use(requireAuth, auditContext);
 
+// Logo/favicon URLs are signed fresh on every read (see lib/storage.js) —
+// the bucket itself has no public-read grant.
+async function withResolvedBranding(org) {
+  if (!org) return org;
+  return {
+    ...org,
+    logo_url: await resolveAssetUrl(org.logo_url),
+    favicon_url: await resolveAssetUrl(org.favicon_url),
+  };
+}
+
 // Global Admin sees every Customer; a Customer Admin/User sees only their
 // own single Customer — a direct equality check now, not a subtree query.
 router.get('/', async (req, res) => {
@@ -24,7 +35,7 @@ router.get('/', async (req, res) => {
     `SELECT * FROM organizations WHERE is_deleted = false AND ($1::uuid IS NULL OR id = $1) ORDER BY name`,
     [scopeOrgId]
   );
-  res.json({ organizations: rows });
+  res.json({ organizations: await Promise.all(rows.map(withResolvedBranding)) });
 });
 
 router.get('/:id', async (req, res) => {
@@ -32,7 +43,7 @@ router.get('/:id', async (req, res) => {
   const org = rows[0];
   if (!org) return res.status(404).json({ error: 'Not found' });
   if (!scopeAllows(req, org.id)) return res.status(403).json({ error: 'Insufficient permissions' });
-  res.json({ organization: org });
+  res.json({ organization: await withResolvedBranding(org) });
 });
 
 router.get('/:id/effective-branding', async (req, res) => {
@@ -60,7 +71,7 @@ router.post('/', requireRole('global_admin'), async (req, res) => {
   const org = rows[0];
 
   await req.logAudit({ action: 'create', entityType: 'organization', entityId: org.id, entityName: org.name, newValues: org });
-  res.status(201).json({ organization: org });
+  res.status(201).json({ organization: await withResolvedBranding(org) });
 });
 
 router.put('/:id', requireRole('global_admin'), async (req, res) => {
@@ -83,7 +94,7 @@ router.put('/:id', requireRole('global_admin'), async (req, res) => {
       values.push(req.body[camel]);
     }
   }
-  if (updates.length === 0) return res.json({ organization: existing });
+  if (updates.length === 0) return res.json({ organization: await withResolvedBranding(existing) });
 
   values.push(req.params.id);
   const { rows } = await pool.query(
@@ -99,7 +110,7 @@ router.put('/:id', requireRole('global_admin'), async (req, res) => {
     oldValues: existing,
     newValues: rows[0],
   });
-  res.json({ organization: rows[0] });
+  res.json({ organization: await withResolvedBranding(rows[0]) });
 });
 
 // Branding uploads hang off the same :id/... shape as everything else here
@@ -109,7 +120,7 @@ router.post('/:id/logo', requireRole('global_admin'), upload.single('logo'), asy
   const key = assetKey('org-logos', req.file.originalname);
   const url = await uploadAsset(key, req.file.buffer, req.file.mimetype);
   await pool.query('UPDATE organizations SET logo_url = $1, updated_at = now() WHERE id = $2', [url, req.params.id]);
-  res.json({ logoUrl: url });
+  res.json({ logoUrl: await resolveAssetUrl(url) });
 });
 
 router.post('/:id/favicon', requireRole('global_admin'), upload.single('favicon'), async (req, res) => {
@@ -117,7 +128,7 @@ router.post('/:id/favicon', requireRole('global_admin'), upload.single('favicon'
   const key = assetKey('org-favicons', req.file.originalname);
   const url = await uploadAsset(key, req.file.buffer, req.file.mimetype);
   await pool.query('UPDATE organizations SET favicon_url = $1, updated_at = now() WHERE id = $2', [url, req.params.id]);
-  res.json({ faviconUrl: url });
+  res.json({ faviconUrl: await resolveAssetUrl(url) });
 });
 
 router.delete('/:id', requireRole('global_admin'), async (req, res) => {

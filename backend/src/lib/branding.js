@@ -1,4 +1,5 @@
 import pool from '../db/pool.js';
+import { resolveAssetUrl } from './storage.js';
 
 const BRANDING_FIELDS = [
   'name_override',
@@ -32,5 +33,7 @@ export async function getEffectiveBranding(organizationId) {
       }
     }
   }
+  if (effective.logo_url) effective.logo_url = await resolveAssetUrl(effective.logo_url);
+  if (effective.favicon_url) effective.favicon_url = await resolveAssetUrl(effective.favicon_url);
   return { ...effective, sources: sourceIds };
 }

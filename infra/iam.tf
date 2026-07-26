@@ -54,23 +54,25 @@ resource "google_storage_bucket_iam_member" "api_branding_write" {
   member = "serviceAccount:${google_service_account.api_runtime.email}"
 }
 
-# Uploaded logos render in <img> tags for every portal user (including a
-# customer's own end users under white-labeling), so they need to be
-# fetchable without auth. Scoped to just this bucket, not project-wide.
-#
-# DISABLED: orgs enforcing iam.allowedPolicyMemberDomains (Domain Restricted
-# Sharing) reject any allUsers grant outright — unlike Cloud Run, GCS bucket
-# ACLs have no invoker-check-style bypass. Until this is revisited (either a
-# custom org policy with a conditional exception, or switching branding
-# asset delivery to signed URLs served through the API), uploaded logos/
-# photos will 403 when rendered directly. Re-enable this resource if
-# deploying into an org without that constraint. See
+# Uploaded logos/photos render in <img> tags for every portal user
+# (including a customer's own end users under white-labeling, who are never
+# authenticated against this app). A public-read bucket grant would be the
+# simplest way to make that work, but orgs enforcing
+# iam.allowedPolicyMemberDomains (Domain Restricted Sharing) reject any
+# allUsers grant outright — unlike Cloud Run, GCS bucket ACLs have no
+# invoker-check-style bypass. Instead, the API signs a short-lived V4 URL
+# per request (backend/src/lib/storage.js's resolveAssetUrl()), which works
+# regardless of org policy — this is deployment-target-independent, so it's
+# the mechanism everywhere, not just under DRS. See
 # DEPLOYMENT_ARCHITECTURE.md's storage design section.
-# resource "google_storage_bucket_iam_member" "branding_public_read" {
-#   bucket = google_storage_bucket.branding.name
-#   role   = "roles/storage.objectViewer"
-#   member = "allUsers"
-# }
+#
+# Signing needs the runtime SA to impersonate itself via IAM signBlob (no
+# service-account key file — Cloud Run has none, and shouldn't).
+resource "google_service_account_iam_member" "api_signer" {
+  service_account_id = google_service_account.api_runtime.name
+  role                = "roles/iam.serviceAccountTokenCreator"
+  member              = "serviceAccount:${google_service_account.api_runtime.email}"
+}
 
 # The web service is static nginx — no special permissions needed, but it
 # gets its own identity for least-privilege / auditability.

@@ -24,7 +24,7 @@ procedures (rollback, secret rotation, restore), see [RUNBOOK.md](RUNBOOK.md).
                              │        │ └─────────────────────┘
                              ▼        ▼
                    ┌────────────┐  ┌─────────────────────────┐
-                   │ SMTP relay │  │  GCS: branding/photos    │  public read,
+                   │ SMTP relay │  │  GCS: branding/photos    │  signed URLs,
                    │ (external) │  │  bucket (storage.tf)     │  versioned
                    └────────────┘  └─────────────────────────┘
 
@@ -48,7 +48,7 @@ Both Cloud Run services scale to zero by default in test
 |---|---|---|
 | 1 | Outbound email | `backend/src/lib/email.js` (nodemailer; console-log fallback when unconfigured) + `SMTP_*` vars wired in `infra/cloudrun.tf`, password in Secret Manager (`infra/secrets.tf`) |
 | 2 | Invitation workflow | `backend/src/lib/invitations.js`, `routes/auth.js` (`/accept-invite`), `AcceptInvite.jsx` — fully built; the invite link reuses `CORS_ORIGIN` (the deployed web URL), so it "activates" once #1 is wired and `deploy.sh` completes its CORS fixup step |
-| 3 | Secure storage — logos | `backend/src/lib/storage.js` (`uploadAsset`) → GCS bucket in `infra/storage.tf`, public read scoped to just this bucket |
+| 3 | Secure storage — logos | `backend/src/lib/storage.js` (`uploadAsset`) → GCS bucket in `infra/storage.tf`, private, served via signed URLs (`resolveAssetUrl`) |
 | 3 | Secure storage — profile pictures | Same bucket/mechanism as logos (see "Storage design" below) |
 | 4 | Environment configs | `infra/envs/test.tfvars`, `infra/envs/prod.tfvars` (see table below); Dev is local-only, no cloud infra |
 | 5 | Logging and monitoring | Cloud Logging: automatic. Monitoring: `infra/monitoring.tf` (uptime checks + alert policies + email notification channel) |
@@ -76,30 +76,37 @@ separate projects. If you need stronger isolation (separate billing, IAM,
 quotas) later, the same `envs/*.tfvars` pattern extends to a
 `project_id` override per environment.
 
-## Storage design: why logos and photos share one public-read bucket
+## Storage design: why logos and photos share one signed-URL bucket
 
 Both org logos and person profile photos go through the same
 `uploadAsset()` in `backend/src/lib/storage.js`, into the same GCS bucket
-(`infra/storage.tf`), with bucket-wide public read. This is deliberate, not
-an oversight:
+(`infra/storage.tf`). The bucket has no public-read grant — every URL
+handed to the browser is a short-lived (7-day max) V4 signed URL, generated
+per-request by `resolveAssetUrl()` in the same file, and applied at every
+API response that includes a `logo_url`/`favicon_url`/`photo_url` field
+(`routes/organizations.js`, `routes/tasSettings.js`, `routes/people.js`,
+`lib/branding.js`'s `getEffectiveBranding`).
 
-- **Logos** must be publicly fetchable — they render in `<img>` tags for
-  every portal user, including a customer's own end users under
-  white-labeling, who are never authenticated against this app at all.
-- **Photos** render in authenticated pages only, but as plain `<img src>`
-  tags — making them require auth would mean either signed URLs (each with
-  their own expiry/refresh complexity) or proxying every image through the
-  API. Given photos are non-sensitive (professional headshots of on-call
-  staff, not medical/financial/identity data) and object names are
-  UUID-suffixed (`assetKey()` — not guessable, not enumerable), the
-  practical risk of unauthenticated-but-unguessable access is low relative
-  to the complexity of a signed-URL scheme.
+This replaced an earlier public-read design after hitting a real deployment
+blocker: orgs enforcing `iam.allowedPolicyMemberDomains` (Domain Restricted
+Sharing) reject any `allUsers` IAM grant outright, so a public-read bucket
+simply doesn't work there — confirmed live in the `test` environment. Since
+the app's whole premise (per the TAS Client Portal target spec) is
+deploying into many different customers' own GCP projects, each with its
+own IAM/org-policy posture, signed URLs are the org-policy-independent
+choice — one mechanism that works the same way everywhere, rather than
+something to re-solve per tenant.
 
-If this tradeoff changes for your deployment (e.g. photos need to stop
-being fetchable without auth), split `storage.tf` into two buckets — one
-public (logos), one private with `roles/storage.objectViewer` removed and a
-signed-URL-issuing endpoint added to `routes/people.js` — rather than
-changing the shared one, so logos keep working unmodified.
+Signing uses IAM `signBlob` impersonation (the API's Cloud Run runtime
+service account is granted `roles/iam.serviceAccountTokenCreator` on
+itself — `infra/iam.tf`'s `api_signer`) rather than a service-account key
+file, since Cloud Run has none and shouldn't. `storage.js` caches signed
+URLs in-memory (keyed by object key, refreshed with a day of margin before
+the 7-day signature actually expires) to avoid re-signing on every single
+request to a list endpoint (`GET /people`, `GET /organizations`) that
+returns many image URLs at once. Object names are also UUID-suffixed
+(`assetKey()`) as defense in depth, though that's no longer the only thing
+standing between an object and the public internet.
 
 ## Secret management
 

@@ -32,22 +32,32 @@ function normalizeBranding(data) {
   };
 }
 
+// logoUrl/faviconUrl are signed GCS URLs that expire after 7 days (see
+// backend/src/lib/storage.js's resolveAssetUrl) — refetching periodically
+// keeps a long-lived open tab from ever showing a broken image, on top of
+// the normal refetch below that already happens on every org-id change.
+const REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+
 export function BrandingProvider({ children }) {
   const { user } = useAuth();
   const [branding, setBranding] = useState(DEFAULT_BRANDING);
 
   useEffect(() => {
     let cancelled = false;
-    // No Customer to inherit from (logged out, or a Global Admin with no
-    // organization) — fall back to the TAS-wide settings directly, publicly
-    // readable so the Login screen can show the TAS's own branding too.
-    const request = user?.organizationId
-      ? api.get(`/organizations/${user.organizationId}/effective-branding`)
-      : api.get('/tas-settings/public').then((data) => data.tasSettings);
-    request
-      .then((data) => { if (!cancelled) setBranding(normalizeBranding(data)); })
-      .catch(() => { if (!cancelled) setBranding(DEFAULT_BRANDING); });
-    return () => { cancelled = true; };
+    function fetchBranding() {
+      // No Customer to inherit from (logged out, or a Global Admin with no
+      // organization) — fall back to the TAS-wide settings directly, publicly
+      // readable so the Login screen can show the TAS's own branding too.
+      const request = user?.organizationId
+        ? api.get(`/organizations/${user.organizationId}/effective-branding`)
+        : api.get('/tas-settings/public').then((data) => data.tasSettings);
+      request
+        .then((data) => { if (!cancelled) setBranding(normalizeBranding(data)); })
+        .catch(() => { if (!cancelled) setBranding(DEFAULT_BRANDING); });
+    }
+    fetchBranding();
+    const interval = setInterval(fetchBranding, REFRESH_INTERVAL_MS);
+    return () => { cancelled = true; clearInterval(interval); };
   }, [user?.organizationId]);
 
   return <BrandingContext.Provider value={branding}>{children}</BrandingContext.Provider>;

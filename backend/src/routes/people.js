@@ -5,12 +5,19 @@ import pool from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireRole } from '../middleware/rbac.js';
 import { auditContext } from '../middleware/audit.js';
-import { assetKey, uploadAsset } from '../lib/storage.js';
+import { assetKey, uploadAsset, resolveAssetUrl } from '../lib/storage.js';
 import { createInvitation } from '../lib/invitations.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 router.use(requireAuth, auditContext);
+
+// photo_url is signed fresh on every read (see lib/storage.js) — the
+// bucket itself has no public-read grant.
+async function withResolvedPhoto(person) {
+  if (!person) return person;
+  return { ...person, photo_url: await resolveAssetUrl(person.photo_url) };
+}
 
 router.get('/', async (req, res) => {
   const scopeOrgId = req.user.role === 'global_admin' ? null : req.user.organizationId;
@@ -22,7 +29,7 @@ router.get('/', async (req, res) => {
      ORDER BY name`,
     [scopeOrgId]
   );
-  res.json({ people: rows });
+  res.json({ people: await Promise.all(rows.map(withResolvedPhoto)) });
 });
 
 router.get('/:id', async (req, res) => {
@@ -31,7 +38,7 @@ router.get('/:id', async (req, res) => {
   if (!person) return res.status(404).json({ error: 'Not found' });
   if (!scopeAllows(req, person.organization_id)) return res.status(403).json({ error: 'Insufficient permissions' });
   const { password_hash, mfa_secret, ...safe } = person;
-  res.json({ person: safe });
+  res.json({ person: await withResolvedPhoto(safe) });
 });
 
 const createSchema = z.object({
@@ -73,7 +80,7 @@ router.post('/', requireRole('customer_admin'), async (req, res) => {
 
   await req.logAudit({ action: 'create', entityType: 'person', entityId: person.id, entityName: person.name, organizationId: input.organizationId });
   const { password_hash, mfa_secret, ...safe } = person;
-  res.status(201).json({ person: safe });
+  res.status(201).json({ person: await withResolvedPhoto(safe) });
 });
 
 router.put('/:id', requireRole('customer_admin'), async (req, res) => {
@@ -99,7 +106,10 @@ router.put('/:id', requireRole('customer_admin'), async (req, res) => {
     updates.push(`role = $${i++}`);
     values.push(req.body.role);
   }
-  if (updates.length === 0) return res.json({ person: existing });
+  if (updates.length === 0) {
+    const { password_hash, mfa_secret, ...safe } = existing;
+    return res.json({ person: await withResolvedPhoto(safe) });
+  }
 
   values.push(req.params.id);
   const { rows } = await pool.query(
@@ -120,7 +130,7 @@ router.put('/:id', requireRole('customer_admin'), async (req, res) => {
   await req.logAudit({ action: 'update', entityType: 'person', entityId: req.params.id, entityName: rows[0].name, oldValues: existing, newValues: rows[0] });
 
   const { password_hash, mfa_secret, ...safe } = rows[0];
-  res.json({ person: safe });
+  res.json({ person: await withResolvedPhoto(safe) });
 });
 
 router.post('/:id/photo', upload.single('photo'), async (req, res) => {
@@ -131,7 +141,7 @@ router.post('/:id/photo', upload.single('photo'), async (req, res) => {
   const key = assetKey('person-photos', req.file.originalname);
   const url = await uploadAsset(key, req.file.buffer, req.file.mimetype);
   await pool.query('UPDATE people SET photo_url = $1, updated_at = now() WHERE id = $2', [url, req.params.id]);
-  res.json({ photoUrl: url });
+  res.json({ photoUrl: await resolveAssetUrl(url) });
 });
 
 router.delete('/:id', requireRole('customer_admin'), async (req, res) => {
