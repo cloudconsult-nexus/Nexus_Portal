@@ -79,10 +79,27 @@ router.put('/:id', requireRole('global_admin'), async (req, res) => {
   const existing = existingRows[0];
   if (!existing) return res.status(404).json({ error: 'Not found' });
 
+  // Setting a parent must not create a cycle (including the trivial
+  // self-parent case) — walk up from the proposed new parent and reject if
+  // the Customer being edited shows up in that ancestor chain.
+  if (req.body.parentId !== undefined && req.body.parentId !== null) {
+    const { rows: cycleRows } = await pool.query(
+      `WITH RECURSIVE ancestors AS (
+         SELECT id, parent_id FROM organizations WHERE id = $1
+         UNION ALL
+         SELECT o.id, o.parent_id FROM organizations o JOIN ancestors a ON o.id = a.parent_id
+       )
+       SELECT 1 FROM ancestors WHERE id = $2 LIMIT 1`,
+      [req.body.parentId, req.params.id]
+    );
+    if (cycleRows[0]) return res.status(400).json({ error: 'A Customer cannot be its own ancestor' });
+  }
+
   const fields = [
     'name', 'account_number', 'phone', 'email', 'address', 'website', 'primary_contact',
     'call_messages_url', 'logo_url', 'primary_color', 'accent_color', 'name_override',
     'tagline', 'favicon_url', 'description', 'message_html', 'contact_edit_requires_approval',
+    'parent_id',
   ];
   const updates = [];
   const values = [];

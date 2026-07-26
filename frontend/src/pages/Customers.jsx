@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, RotateCcw, Building2, Search, Pencil } from 'lucide-react';
+import { Plus, Trash2, RotateCcw, Building2, Search, Pencil, ChevronRight, ChevronDown } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { isGlobalAdmin } from '../lib/roles.js';
-import { filterBySearch, sortByName } from '../lib/orgHierarchy.js';
+import { sortByName, findOrg, buildTree, filterTree, getDescendantIds } from '../lib/orgHierarchy.js';
 import {
-  PageHeader, Card, Button, Input, Field, Textarea, Checkbox, Modal, ConfirmDialog,
+  PageHeader, Card, Button, Input, Field, Select, Textarea, Checkbox, Modal, ConfirmDialog,
   LoadingBlock, EmptyState, ErrorBanner, Badge,
 } from '../components/ui.jsx';
 import LogoUpload from '../components/LogoUpload.jsx';
@@ -64,6 +64,7 @@ export default function Customers() {
   const [newName, setNewName] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [collapsedIds, setCollapsedIds] = useState(new Set());
 
   async function loadList() {
     setLoading(true);
@@ -79,7 +80,31 @@ export default function Customers() {
 
   useEffect(() => { loadList(); }, []);
 
-  const filtered = sortByName(filterBySearch(orgs, search));
+  const tree = filterTree(buildTree(orgs), search);
+  const parentIds = new Set(orgs.filter((o) => o.parent_id).map((o) => o.parent_id));
+
+  function toggleCollapsed(id) {
+    setCollapsedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  // Flattens the visible (non-collapsed) part of the tree into a single
+  // list, so the row cards can render in one space-y-3 container at
+  // whatever depth, rather than nesting nested containers per level.
+  function flattenVisible(nodes, depth = 0) {
+    const rows = [];
+    for (const node of nodes) {
+      const hasChildren = node.children.length > 0;
+      rows.push({ org: node, depth, hasChildren });
+      if (hasChildren && !collapsedIds.has(node.id)) {
+        rows.push(...flattenVisible(node.children, depth + 1));
+      }
+    }
+    return rows;
+  }
 
   // The list row already has every field (GET /organizations is SELECT *),
   // so opening the modal is just populating state from it — no per-row
@@ -112,6 +137,7 @@ export default function Customers() {
         const camel = f.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
         payload[camel] = form[f] ?? (f === 'contact_edit_requires_approval' ? false : '');
       });
+      payload.parentId = form.parent_id || null;
       const { organization } = await api.put(`/organizations/${selectedId}`, payload);
       setDetail(organization);
       setForm(organization);
@@ -180,21 +206,45 @@ export default function Customers() {
       />
       <div className="p-8 space-y-4">
         {error && <ErrorBanner message={error} />}
-        <div className="relative max-w-sm">
-          <Search size={14} className="absolute left-2.5 top-2.5 text-muted" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search customers…" className="pl-8" />
+        <div className="flex items-center gap-3">
+          <div className="relative max-w-sm flex-1">
+            <Search size={14} className="absolute left-2.5 top-2.5 text-muted" />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search customers…" className="pl-8" />
+          </div>
+          {parentIds.size > 0 && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setCollapsedIds(collapsedIds.size ? new Set() : new Set(parentIds))}
+            >
+              {collapsedIds.size ? 'Expand all' : 'Collapse all'}
+            </Button>
+          )}
         </div>
 
-        {loading ? <LoadingBlock /> : filtered.length === 0 ? (
+        {loading ? <LoadingBlock /> : orgs.length === 0 ? (
           <EmptyState title="No customers yet" description={canManage ? 'Create your first Customer to get started.' : undefined} />
+        ) : tree.length === 0 ? (
+          <EmptyState title="No customers match your search" />
         ) : (
           <div className="space-y-3">
-            {filtered.map((org) => (
+            {flattenVisible(tree).map(({ org, depth, hasChildren }) => (
               <Card
                 key={org.id}
                 className={`p-4 flex items-center gap-4 cursor-pointer hover:border-signal-amber/40 transition-colors ${org.is_deleted ? 'opacity-60' : ''}`}
+                style={{ marginLeft: depth * 28 }}
                 onClick={() => openDetail(org)}
               >
+                {hasChildren ? (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleCollapsed(org.id); }}
+                    className="text-muted hover:text-ink shrink-0"
+                  >
+                    {collapsedIds.has(org.id) ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+                  </button>
+                ) : (
+                  <span className="w-4 shrink-0" />
+                )}
                 <div className="h-10 w-10 rounded-lg bg-surface border border-line flex items-center justify-center shrink-0">
                   <Building2 size={18} className="text-ink" />
                 </div>
@@ -265,6 +315,13 @@ export default function Customers() {
                   </div>
                   <Field label="Address"><Input value={form.address || ''} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
                   <Field label="Call messages URL"><Input value={form.call_messages_url || ''} onChange={(e) => setForm({ ...form, call_messages_url: e.target.value })} /></Field>
+                  <Field label="Parent customer" hint="Optional — nests this Customer under another for display grouping.">
+                    <Select value={form.parent_id || ''} onChange={(e) => setForm({ ...form, parent_id: e.target.value || null })}>
+                      <option value="">None (top-level)</option>
+                      {sortByName(orgs.filter((o) => o.id !== selectedId && !o.is_deleted && !getDescendantIds(orgs, selectedId).has(o.id)))
+                        .map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                    </Select>
+                  </Field>
                   <Checkbox
                     label="Contact edits require Global Admin approval"
                     checked={!!form.contact_edit_requires_approval}
@@ -283,6 +340,7 @@ export default function Customers() {
                   </div>
                   <ReadOnlyField label="Address" value={detail.address} />
                   <ReadOnlyField label="Call messages URL" value={detail.call_messages_url} />
+                  <ReadOnlyField label="Parent customer" value={detail.parent_id ? findOrg(orgs, detail.parent_id)?.name : null} />
                   <ReadOnlyField label="Contact edits require approval" value={detail.contact_edit_requires_approval ? 'Yes' : 'No'} />
                 </>
               )}

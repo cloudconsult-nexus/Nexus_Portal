@@ -14,9 +14,10 @@ evolving into the "TAS Client Portal"** — a white-labeled portal for Telephone
 Answering Service (TAS) organizations, integrating with Nextiva Contact Center
 (NCC, built on Thrio, api.thrio.com). This is the next stage of *this same app*,
 not a separate product — see "Target spec: TAS Client Portal" below for the
-concrete deltas between what exists today and where this is headed. Do not
-architect new features against the generic 5-level hierarchy described below
-without checking whether they should instead target the TAS/Customer model.
+concrete deltas between what exists today and where this is headed.
+**Phase 5.1 (hierarchy/role flattening) is done as of 2026-07-26** — see Domain
+model below and the Build history entry; don't architect new features against
+the old 5-level hierarchy this section used to describe.
 
 ## Stack
 - **API:** Node.js / Express
@@ -26,15 +27,32 @@ without checking whether they should instead target the TAS/Customer model.
 - **Design tokens:** Ink navy `#1B2333`, Signal Amber `#F5A623` accent; Inter (body) / IBM Plex Mono (code/data)
 
 ## Domain model
-Multi-tenant hierarchy: **Master Org → Main Account → Sub Account → Department →
-Provider → Calendar**. Every node supports full CRUD, move (parent picker — no
-drag-and-drop needed), soft-delete, and audit logging.
+Flat **TAS instance → Customer** model (Phase 5.1, 2026-07-26): one deployed
+Portal is one TAS (singleton `tas_settings` row), and every `organizations` row
+is a standalone Customer with equal standing — no fixed hierarchy levels, no
+Master Org/Main Account/Sub Account/Provider/Department node types (all
+dropped, `migrations/013_tas_customer_model.sql`). Contacts/schedules are
+siloed per Customer.
 
-Users and People are consolidated into a single **Person + RBAC** model. Roles:
-Global Admin, Org Admin, Scheduler, Technician, Read Only.
+**Optional Customer nesting reintroduced (2026-07-26, `migrations/
+014_organization_hierarchy.sql`), at the client's explicit request, for the
+Customers page's tile display** (indent + expand/collapse) — `organizations.
+parent_id`, nullable, any Customer can optionally nest under any other
+(no fixed levels/types, unlike the old hierarchy). This is **display/data
+only** — RBAC scope is unchanged: a Customer Admin/User still only ever sees
+their own single Customer row via `GET /organizations`, never their
+parent's/children's data. Don't read this column's existence as a reversion
+to the old rigid hierarchy model or extend RBAC to subtrees without asking —
+neither was requested.
 
-Branding/white-labeling is configurable at **any** node in the hierarchy, not just
-Master Org.
+Users and People are consolidated into a single **Person + RBAC** model.
+Roles: Global Admin, Customer Admin, User (3 tiers, down from the old 5 —
+`can_edit_schedule` is a per-person capability grant, not a role tier).
+
+Branding/white-labeling falls back 2 levels: Customer → TAS-wide `tas_settings`
+(not an arbitrary-depth ancestor walk, since there's no fixed hierarchy to
+walk — the optional `parent_id` nesting above doesn't participate in branding
+inheritance).
 
 ## Build history (phases, in order)
 1. **Phase 1 — Users+People consolidation & RBAC.** Unified Person model, role system.
@@ -53,9 +71,17 @@ Master Org.
 Terraform / Cloud Build / deploy scripts have been stable since Phase 1 — no infra
 changes across phases 2-4.
 
-5. **Phase 5 — TAS Client Portal alignment (planned, not yet started).** Confirmed
-   as this application's next stage. See "Target spec" below for scope; break into
-   sub-phases before implementing rather than attempting all at once.
+5. **Phase 5 — TAS Client Portal alignment.** Confirmed as this application's
+   next stage. See "Target spec" below for full scope; broken into sub-phases
+   rather than attempted all at once.
+   - **5.1 — Hierarchy & role flattening (done, 2026-07-26).** 5-level generic
+     tree → flat TAS/Customer model; 5 roles → 3. See Domain model above.
+     Includes the git/CI-CD migration (GitHub + Cloud Build), the multi-tenant
+     onboarding runbook, and the signed-URL fix for logo/photo storage —
+     all done the same day. Optional Customer `parent_id` nesting (display
+     only) added afterward at the client's request — see Domain model.
+   - 5.2 (messages/PHI), 5.3 (reports), 5.4 (NCC/Thrio integration), 5.5
+     (in-app onboarding wizard) — not started.
 
 ## Target spec: TAS Client Portal
 
@@ -66,14 +92,18 @@ the other `.docx` guides, see below). Read those directly for full detail; this
 is a delta summary against what's actually built today so the gap doesn't have
 to be re-derived from the source docs every session.
 
-**Confirmed deltas (current state → target):**
-- **Hierarchy/multi-tenancy:** 5-level generic tree (Master Org → Main Account →
-  Sub Account → Department → Provider) → 2-tier (TAS instance → Customer).
-  Contacts/schedules are fully siloed per Customer, no cross-Customer identity
-  sharing even for the same real-world person.
-- **Roles:** 5 tiers (Global Admin, Org Admin, Scheduler, Technician, Read Only)
-  → 3 tiers (Global Admin (TAS-wide), Customer Admin, User). Recording-download
-  permission is finer-grained than role alone (role AND Customer/DID/campaign ID).
+**Confirmed deltas (original state → target; hierarchy/roles rows below are
+already done — Phase 5.1 — kept here for the full original-vs-target picture):**
+- **Hierarchy/multi-tenancy — done.** 5-level generic tree (Master Org → Main
+  Account → Sub Account → Department → Provider) → 2-tier (TAS instance →
+  Customer), plus an optional non-hierarchical `parent_id` nesting added back
+  afterward for display purposes only (see Domain model above). Contacts/
+  schedules are fully siloed per Customer, no cross-Customer identity sharing
+  even for the same real-world person.
+- **Roles — done.** 5 tiers (Global Admin, Org Admin, Scheduler, Technician,
+  Read Only) → 3 tiers (Global Admin (TAS-wide), Customer Admin, User).
+  Recording-download permission is finer-grained than role alone (role AND
+  Customer/DID/campaign ID) — not yet implemented, still a target-spec item.
 - **Deployment model:** currently one shared instance (this Cloud Run/Cloud SQL
   setup) → target is each TAS self-hosting its own instance, cloud-agnostic
   (AWS/Azure/GCP/on-prem), containerized, HA. Needs a configuration wizard
