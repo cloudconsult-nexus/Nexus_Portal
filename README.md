@@ -4,6 +4,8 @@ A from-scratch implementation of the on-call scheduling system described in
 the *OnCall Pro Administrator Guide*, plus everything needed to deploy it to
 Google Cloud Platform.
 
+Deploys to `test` automatically via Cloud Build on every push to `main`.
+
 ## What this is
 
 - **`backend/`** — Node.js/Express REST API. JWT auth, org-hierarchy-scoped
