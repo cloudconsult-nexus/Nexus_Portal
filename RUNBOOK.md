@@ -42,18 +42,85 @@ CLOUDSQL_CONN=$(cd infra && terraform output -raw cloudsql_connection_name)
 (Terraform only changes what drifted; Cloud Run deploys a new revision each
 time regardless).
 
-**CI/CD**: wire up `cloudbuild.yaml` once per environment:
+**CI/CD**: wire up `cloudbuild.yaml` once per environment/instance —
+connect the repo to Cloud Build first (console → Cloud Build → Triggers →
+Connect Repository → GitHub App → select the repo; this one-time step needs
+a human in a browser, it can't be scripted), then create the trigger. Newer
+GCP projects reject an implicit/default service account on triggers, so
+create a dedicated one first:
 
 ```bash
+gcloud iam service-accounts create cloudbuild-deployer \
+  --display-name="Cloud Build Deployer" --project=<project-id>
+
+for role in roles/run.admin roles/iam.serviceAccountUser \
+            roles/artifactregistry.writer roles/logging.logWriter; do
+  gcloud projects add-iam-policy-binding <project-id> \
+    --member="serviceAccount:cloudbuild-deployer@<project-id>.iam.gserviceaccount.com" \
+    --role="$role"
+done
+
 gcloud builds triggers create github \
-  --repo-name=<your-repo> --repo-owner=<you> --branch-pattern='^main$' \
+  --name="<instance>-deploy" \
+  --repo-name=<your-repo> --repo-owner=<your-org> --branch-pattern='^main$' \
   --build-config=cloudbuild.yaml \
-  --substitutions=_API_URL=$(gcloud run services describe oncall-pro-prod-api --region us-central1 --format='value(status.url)')
+  --service-account="projects/<project-id>/serviceAccounts/cloudbuild-deployer@<project-id>.iam.gserviceaccount.com" \
+  --substitutions="_APP_NAME=oncall-pro-<instance>,_API_URL=$(gcloud run services describe oncall-pro-<instance>-api --region us-central1 --format='value(status.url)')"
 ```
 
 `cloudbuild.yaml` only builds/pushes/deploys — it doesn't run
 `terraform apply`, so infra changes (new tfvars, new secrets, scaling
 changes) still go through `deploy.sh` manually.
+
+## Onboarding a new tenant (separate GCP account)
+
+Each TAS Client Portal customer gets their own fully separate instance —
+own GCP project, own Cloud SQL, own everything (see
+`CLAUDE.md`'s Phase 5 target-spec section). The infra is already
+project-agnostic (see `infra/variables.tf`'s `project_id`, which has no
+default and is never hardcoded), so onboarding a new tenant is mostly the
+same "First-time bootstrap" sequence above, run against their project
+instead of ours, plus a couple of extra one-time steps:
+
+**Prerequisites**: the tenant's GCP project exists, billing is enabled on
+it, and whoever runs this has `roles/owner` (or equivalent) on it.
+
+```bash
+# 1. Copy the tenant templates and fill in the placeholders.
+cp infra/envs/TEMPLATE.tfvars.tenant infra/envs/<tenant-slug>.tfvars
+cp infra/envs/TEMPLATE.backend.hcl.tenant infra/envs/<tenant-slug>.backend.hcl
+# Edit both: project_id, app_name, alert_notification_email, and the
+# backend.hcl bucket name (must be "<tenant-project-id>-tfstate-<tenant-slug>").
+
+# 2. Generate fresh secrets for THIS tenant — never reuse another
+# tenant's or our own test/prod secrets.
+export TF_VAR_project_id=<tenant-project-id>
+export TF_VAR_db_password=$(openssl rand -base64 24)
+export TF_VAR_jwt_secret=$(openssl rand -base64 48)
+export TF_VAR_alert_notification_email=<tenant-ops-address>
+
+# 3. Bootstrap state + provision + deploy + migrate (schema only — no seed
+# data beyond what seedAdmin.js creates next).
+./scripts/bootstrap-state-bucket.sh <tenant-slug>
+./scripts/deploy.sh <tenant-slug>
+
+# 4. Create the tenant's first Global Admin.
+CLOUDSQL_CONN=$(cd infra && terraform output -raw cloudsql_connection_name)
+./scripts/seed-admin.sh "$CLOUDSQL_CONN" admin@<tenant-domain> 'SomeStrongPassword123' 'Tenant Admin Name'
+```
+
+Then repeat the **CI/CD** wiring above (connect-repo console step + dedicated
+`cloudbuild-deployer` service account + trigger), run against the tenant's
+own project, pointed at the same shared GitHub repo — each GCP project has
+its own independent Cloud Build↔GitHub connection even though the
+underlying GitHub App installation is shared across all of them.
+
+**Out of scope here**: the in-app first-run configuration wizard
+(logo/branding, domain, NCC token/domain pairing — see `CLAUDE.md`'s Phase
+5 target spec) is a separate, not-yet-built app feature (Phase 5.5). This
+section only covers infra provisioning — after it, the tenant's Global
+Admin still needs to configure branding by hand via the TAS Settings page
+until that wizard exists.
 
 ## Rollback
 

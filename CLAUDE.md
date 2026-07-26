@@ -78,6 +78,11 @@ to be re-derived from the source docs every session.
   setup) → target is each TAS self-hosting its own instance, cloud-agnostic
   (AWS/Azure/GCP/on-prem), containerized, HA. Needs a configuration wizard
   (branding, domain, NCC token/domain pairing) as an onboarding deliverable.
+  **Infra-provisioning side of this is already done** (2026-07-26): the
+  Terraform/deploy-script layer is project-agnostic and a repeatable
+  onboarding checklist exists — see `RUNBOOK.md`'s "Onboarding a new tenant"
+  section and the `infra/envs/TEMPLATE.*.tenant` files. What's still missing
+  is only the in-app first-run configuration wizard itself (Phase 5.5).
 - **NCC/Thrio integration (not started, highest-criticality piece):** the target
   has NCC calling *into* the Portal in real time during live calls, to an
   on-call-lookup endpoint (`Client/Customer ID` + `DID`/`Queue ID` + "now" vs

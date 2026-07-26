@@ -20,19 +20,29 @@
 #   export TF_VAR_db_password=$(openssl rand -base64 24)
 #   export TF_VAR_jwt_secret=$(openssl rand -base64 48)
 #   export TF_VAR_alert_notification_email=you@example.com
-#   ./scripts/deploy.sh test    # or: prod
+#   ./scripts/deploy.sh test    # or: prod, or a tenant slug like acme-corp
 #
-# First time for a given environment, bootstrap its Terraform state bucket
-# first (one-time, per environment):
+# "Environment" here is really "instance name" — it selects which
+# infra/envs/<name>.tfvars + infra/envs/<name>.backend.hcl pair to use.
+# Our own two environments are "test"/"prod", but the same script deploys a
+# separate tenant's own instance into their own GCP project just as well —
+# see RUNBOOK.md's "Onboarding a new tenant" section.
+#
+# First time for a given instance, bootstrap its Terraform state bucket
+# first (one-time, per instance):
 #   ./scripts/bootstrap-state-bucket.sh test
 #
 # See RUNBOOK.md for the full sequence including CI/CD wiring.
 
 set -euo pipefail
 
-ENVIRONMENT="${1:?Usage: deploy.sh <test|prod>}"
-if [[ "$ENVIRONMENT" != "test" && "$ENVIRONMENT" != "prod" ]]; then
-  echo "Environment must be \"test\" or \"prod\" (Dev runs locally — see README.md). Got: $ENVIRONMENT" >&2
+ENVIRONMENT="${1:?Usage: deploy.sh <instance-name>}"
+if [[ ! "$ENVIRONMENT" =~ ^[a-z][a-z0-9-]*$ ]]; then
+  echo "Instance name must start with a lowercase letter and contain only lowercase letters, digits, and hyphens (e.g. test, prod, acme-corp). Got: $ENVIRONMENT" >&2
+  exit 1
+fi
+if [[ ! -f "$(dirname "${BASH_SOURCE[0]}")/../infra/envs/${ENVIRONMENT}.tfvars" ]]; then
+  echo "No infra/envs/${ENVIRONMENT}.tfvars found. Create one (see infra/envs/TEMPLATE.tfvars.tenant for a new tenant) before deploying. Got: $ENVIRONMENT" >&2
   exit 1
 fi
 

@@ -1,0 +1,15 @@
+# Template for onboarding a new tenant — see infra/envs/TEMPLATE.tfvars.tenant
+# and RUNBOOK.md's "Onboarding a new tenant" section.
+#
+# Copy this file to infra/envs/<tenant-slug>.backend.hcl and fill in the
+# bucket name below. The bucket itself is created once by
+# scripts/bootstrap-state-bucket.sh <tenant-slug> — Terraform can't create
+# the bucket that holds its own state.
+#
+# Bucket name MUST be "<tenant-gcp-project-id>-tfstate-<tenant-slug>" — the
+# project ID prefix is what guarantees this bucket name can never collide
+# with any other tenant's or our own, since GCS bucket names are globally
+# unique across all of GCP (not just within one project).
+
+bucket = "<tenant-gcp-project-id>-tfstate-<tenant-slug>"
+prefix = "terraform/state"

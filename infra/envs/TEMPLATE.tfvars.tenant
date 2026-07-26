@@ -1,0 +1,35 @@
+# Template for onboarding a new tenant into their own, separate GCP project
+# (a TAS Client Portal customer's self-hosted instance — see RUNBOOK.md's
+# "Onboarding a new tenant" section for the full sequence).
+#
+# Copy this file to infra/envs/<tenant-slug>.tfvars and fill in the values
+# below. <tenant-slug> should be short, lowercase, hyphenated (e.g.
+# "acme-corp") — it becomes part of the Cloud Run service names, the
+# Artifact Registry repo name, and the Terraform state bucket name.
+#
+# Apply with:
+#   terraform init -backend-config=envs/<tenant-slug>.backend.hcl
+#   terraform apply -var-file=envs/<tenant-slug>.tfvars
+# (db_password / jwt_secret / smtp_password come from TF_VAR_* env vars —
+# see terraform.tfvars.example — not from this file. Generate fresh values
+# per tenant; never reuse another tenant's or our own test/prod secrets.)
+
+environment = "prod" # almost always "prod" — this IS the tenant's real instance
+app_name    = "oncall-pro-<tenant-slug>"
+
+db_tier           = "db-custom-2-7680" # 2 vCPU / 7.5GB — resize per tenant's expected load
+min_instances_api = 1                  # avoid cold starts on a real customer's traffic
+min_instances_web = 0
+
+backup_retained_count          = 30
+transaction_log_retention_days = 7
+
+# Required — set to the tenant's own ops/on-call address before applying:
+# alert_notification_email = "oncall-alerts@<tenant-domain>"
+
+# Outbound email — invitations silently fall back to console-logging
+# (never delivered) without this. Set at minimum:
+# smtp_host = "smtp.yourprovider.com"
+# smtp_user = "..."
+# smtp_from = "no-reply@<tenant-domain>"
+# (smtp_password via TF_VAR_smtp_password, not here)
