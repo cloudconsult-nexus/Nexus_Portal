@@ -7,7 +7,7 @@ export default function BrandedHeader({ branding }) {
   return (
     <div className="px-4 py-5 border-b border-white/10">
       {branding?.logoUrl ? (
-        <img src={branding.logoUrl} alt={name} className="h-8 max-w-[180px] object-contain object-left" />
+        <img src={branding.logoUrl} alt={name} className="h-10 w-10 object-contain object-left" />
       ) : (
         <span className="text-lg font-semibold tracking-tight text-white">{name}</span>
       )}

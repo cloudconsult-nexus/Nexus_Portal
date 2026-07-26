@@ -46,7 +46,7 @@ export default function Login() {
       <Card className="w-full max-w-sm p-8">
         <div className="flex flex-col items-center text-center mb-6">
           {branding.logoUrl ? (
-            <img src={branding.logoUrl} alt={branding.nameOverride || 'Nexus Portal'} className="h-9 mb-3 object-contain" />
+            <img src={branding.logoUrl} alt={branding.nameOverride || 'Nexus Portal'} className="h-14 w-14 mb-3 object-contain" />
           ) : (
             <ShieldCheck size={28} className="text-signal-amber mb-2" />
           )}

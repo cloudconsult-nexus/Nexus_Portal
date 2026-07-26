@@ -20,9 +20,10 @@ async function getCroppedBlob(imageSrc, cropPixels) {
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/png', 0.95));
 }
 
-// Logos and favicons share this component (different aspect/shape/endpoint)
-// since both are "pick an image, crop it, POST to an org asset route" —
-// same flow as PhotoUpload.jsx but for organization branding, not a Person.
+// Logos and favicons share this component (both cropped to a 1:1 square,
+// different endpoint/preview size) since both are "pick an image, crop it,
+// POST to an org asset route" — same flow as PhotoUpload.jsx but for
+// organization branding, not a Person.
 export default function LogoUpload({ organizationId, imageUrl, onUploaded, kind = 'logo', disabled, uploadPath }) {
   const isFavicon = kind === 'favicon';
   const [source, setSource] = useState(null);
@@ -63,7 +64,7 @@ export default function LogoUpload({ organizationId, imageUrl, onUploaded, kind 
 
   return (
     <div className="flex items-center gap-3">
-      <div className={`flex items-center justify-center bg-surface border border-line rounded-lg overflow-hidden shrink-0 ${isFavicon ? 'h-10 w-10' : 'h-14 w-28'}`}>
+      <div className={`flex items-center justify-center bg-surface border border-line rounded-lg overflow-hidden shrink-0 ${isFavicon ? 'h-10 w-10' : 'h-14 w-14'}`}>
         {imageUrl ? <img src={imageUrl} alt="" className="max-h-full max-w-full object-contain" /> : <ImageIcon size={18} className="text-muted" />}
       </div>
       <label className={`inline-flex items-center gap-1.5 text-xs font-medium text-ink cursor-pointer hover:underline ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
@@ -86,7 +87,7 @@ export default function LogoUpload({ organizationId, imageUrl, onUploaded, kind 
           {error && <ErrorBanner message={error} />}
           <div className="relative h-64 w-full bg-ink/5 rounded-lg overflow-hidden">
             {source && (
-              <Cropper image={source} crop={crop} zoom={zoom} aspect={isFavicon ? 1 : 3} showGrid={false}
+              <Cropper image={source} crop={crop} zoom={zoom} aspect={1} showGrid={false}
                 onCropChange={setCrop} onZoomChange={setZoom} onCropComplete={onCropComplete} />
             )}
           </div>

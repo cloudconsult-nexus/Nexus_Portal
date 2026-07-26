@@ -63,7 +63,7 @@ export default function BrandingPreview() {
               <div className="rounded-xl p-8 flex items-center justify-center" style={{ backgroundColor: branding.primaryColor }}>
                 <Card className="w-full max-w-[240px] p-6 text-center">
                   {branding.logoUrl ? (
-                    <img src={branding.logoUrl} alt="" className="h-8 mb-3 mx-auto object-contain" />
+                    <img src={branding.logoUrl} alt="" className="h-10 w-10 mb-3 mx-auto object-contain" />
                   ) : (
                     <ShieldCheck size={24} style={{ color: branding.accentColor }} className="mx-auto mb-2" />
                   )}

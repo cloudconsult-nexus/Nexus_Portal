@@ -31,7 +31,7 @@ function ReadOnlyImage({ label, url }) {
   return (
     <div>
       <p className="text-xs font-medium text-ink mb-1">{label}</p>
-      <div className="h-14 w-28 rounded-lg border border-line bg-surface flex items-center justify-center overflow-hidden">
+      <div className="h-14 w-14 rounded-lg border border-line bg-surface flex items-center justify-center overflow-hidden">
         {url ? <img src={url} alt="" className="max-h-full max-w-full object-contain" /> : <span className="text-xs text-muted">Not set</span>}
       </div>
     </div>
