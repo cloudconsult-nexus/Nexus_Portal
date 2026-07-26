@@ -96,9 +96,9 @@ async function createEntity(entityType, data) {
   if (entityType === 'person') {
     const org = await lookupOrgId(data.organization_account_number);
     const { rows } = await pool.query(
-      `INSERT INTO people (organization_id, name, email, primary_phone, sms_phone, role, department)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [org, data.name, data.email || null, data.primary_phone || null, data.sms_phone || null, data.role, data.department || null]
+      `INSERT INTO people (organization_id, name, email, primary_phone, sms_phone, role, job_title, department)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+      [org, data.name, data.email || null, data.primary_phone || null, data.sms_phone || null, data.role, data.job_title || null, data.department || null]
     );
     return rows[0].id;
   }
