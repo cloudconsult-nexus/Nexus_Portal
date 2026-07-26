@@ -1,0 +1,467 @@
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, Plus, Wand2, Copy, Trash2, Pencil } from 'lucide-react';
+import { api, ApiError } from '../lib/api.js';
+import { useAuth } from '../context/AuthContext.jsx';
+import { canEditSchedule } from '../lib/roles.js';
+import {
+  PageHeader, Card, Button, Input, Field, Select, Textarea, Checkbox, Tabs,
+  Modal, ConfirmDialog, LoadingBlock, EmptyState, ErrorBanner,
+} from '../components/ui.jsx';
+import EscalationChain from '../components/EscalationChain.jsx';
+
+const VIEWS = [{ value: 'day', label: 'Day' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }];
+const HOURS = Array.from({ length: 24 }, (_, i) => i);
+
+function toISODate(d) { return d.toISOString().slice(0, 10); }
+function startOfWeek(d) { const x = new Date(d); x.setDate(x.getDate() - x.getDay()); return x; }
+function startOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
+function endOfMonth(d) { return new Date(d.getFullYear(), d.getMonth() + 1, 0); }
+function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+function timeToMinutes(t) { const [h, m] = t.split(':').map(Number); return h * 60 + m; }
+function isPast(dateStr) { return new Date(dateStr) < new Date(new Date().toDateString()); }
+
+const EMPTY_SHIFT = {
+  date: toISODate(new Date()), startTime: '09:00', endTime: '17:00', mode: 'escalation',
+  primaryPersonId: '', secondaryPersonId: '', tertiaryPersonId: '', defaultPersonId: '',
+  notes: '', notifySlack: true, notifyEmail: true, replicateMonths: 0,
+};
+
+export default function Schedule() {
+  const { user } = useAuth();
+  const canEdit = canEditSchedule(user);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const [calendars, setCalendars] = useState([]);
+  const [calendarId, setCalendarId] = useState(searchParams.get('calendarId') || '');
+  const [people, setPeople] = useState([]);
+  const [view, setView] = useState('week');
+  const [anchor, setAnchor] = useState(new Date());
+  const [assignments, setAssignments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [warning, setWarning] = useState('');
+
+  const [shiftModalOpen, setShiftModalOpen] = useState(false);
+  const [editingShift, setEditingShift] = useState(null);
+  const [form, setForm] = useState(EMPTY_SHIFT);
+  const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [autoOpen, setAutoOpen] = useState(false);
+
+  useEffect(() => {
+    api.get('/calendars').then((data) => {
+      setCalendars(data.calendars);
+      if (!calendarId && data.calendars[0]) setCalendarId(data.calendars[0].id);
+    });
+    api.get('/people').then((data) => setPeople(data.people));
+  }, []);
+
+  useEffect(() => {
+    if (calendarId) setSearchParams({ calendarId }, { replace: true });
+  }, [calendarId]);
+
+  const { rangeStart, rangeEnd } = useMemo(() => {
+    if (view === 'day') return { rangeStart: anchor, rangeEnd: anchor };
+    if (view === 'week') { const s = startOfWeek(anchor); return { rangeStart: s, rangeEnd: addDays(s, 6) }; }
+    return { rangeStart: startOfMonth(anchor), rangeEnd: endOfMonth(anchor) };
+  }, [view, anchor]);
+
+  async function loadAssignments() {
+    if (!calendarId) return;
+    setLoading(true);
+    setError('');
+    try {
+      const data = await api.get(`/assignments?calendarId=${calendarId}&startDate=${toISODate(rangeStart)}&endDate=${toISODate(rangeEnd)}`);
+      setAssignments(data.assignments);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { loadAssignments(); }, [calendarId, rangeStart.getTime(), rangeEnd.getTime()]);
+
+  const peopleById = useMemo(() => Object.fromEntries(people.map((p) => [p.id, p])), [people]);
+  const byDate = useMemo(() => {
+    const map = {};
+    for (const a of assignments) (map[a.date] ||= []).push(a);
+    for (const key in map) map[key].sort((a, b) => timeToMinutes(a.start_time) - timeToMinutes(b.start_time));
+    return map;
+  }, [assignments]);
+
+  function openCreate(date) {
+    setEditingShift(null);
+    setForm({ ...EMPTY_SHIFT, date: date || toISODate(anchor) });
+    setWarning('');
+    setShiftModalOpen(true);
+  }
+
+  function openEdit(a) {
+    setEditingShift(a);
+    setForm({
+      date: a.date, startTime: a.start_time?.slice(0, 5), endTime: a.end_time?.slice(0, 5), mode: a.mode,
+      primaryPersonId: a.primary_person_id || '', secondaryPersonId: a.secondary_person_id || '',
+      tertiaryPersonId: a.tertiary_person_id || '', defaultPersonId: a.default_person_id || '',
+      notes: a.notes || '', notifySlack: a.notify_slack, notifyEmail: a.notify_email, replicateMonths: 0,
+    });
+    setWarning('');
+    setShiftModalOpen(true);
+  }
+
+  async function handleSaveShift() {
+    setSaving(true);
+    setError('');
+    setWarning('');
+    try {
+      if (editingShift) {
+        await api.put(`/assignments/${editingShift.id}`, form);
+      } else {
+        const data = await api.post('/assignments', { ...form, calendarId });
+        if (data.conflicts?.length) {
+          setWarning(`Created, but ${data.conflicts.length} shift(s) conflict with another calendar for the assigned person.`);
+        }
+      }
+      setShiftModalOpen(false);
+      await loadAssignments();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setError('Scheduling conflict: this person is already on call elsewhere during this window.');
+      } else {
+        setError(err.message);
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDeleteShift() {
+    setSaving(true);
+    try {
+      await api.del(`/assignments/${deleteTarget.id}`);
+      setDeleteTarget(null);
+      await loadAssignments();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function navigate(dir) {
+    if (view === 'day') setAnchor(addDays(anchor, dir));
+    else if (view === 'week') setAnchor(addDays(anchor, dir * 7));
+    else setAnchor(new Date(anchor.getFullYear(), anchor.getMonth() + dir, 1));
+  }
+
+  return (
+    <div>
+      <PageHeader
+        title="Schedule"
+        description="Click a shift to edit it. Past shifts are read-only."
+        actions={
+          <div className="flex items-center gap-2">
+            <Select value={calendarId} onChange={(e) => setCalendarId(e.target.value)} className="w-48">
+              {calendars.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
+            {canEdit && calendarId && (
+              <>
+                <Button variant="secondary" onClick={() => setAutoOpen(true)}><Wand2 size={14} /> Auto-schedule</Button>
+                <Button onClick={() => openCreate()}><Plus size={14} /> New shift</Button>
+              </>
+            )}
+          </div>
+        }
+      />
+      <Tabs tabs={VIEWS} active={view} onChange={setView} />
+
+      <div className="px-8 py-4 flex items-center gap-3">
+        <button onClick={() => navigate(-1)} className="p-1.5 rounded hover:bg-surface text-muted"><ChevronLeft size={16} /></button>
+        <span className="text-sm font-medium text-ink">
+          {view === 'month'
+            ? anchor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+            : `${rangeStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${rangeEnd.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`}
+        </span>
+        <button onClick={() => navigate(1)} className="p-1.5 rounded hover:bg-surface text-muted"><ChevronRight size={16} /></button>
+        <Button variant="ghost" size="sm" onClick={() => setAnchor(new Date())}>Today</Button>
+      </div>
+
+      <div className="px-8 pb-8 space-y-3">
+        {error && <ErrorBanner message={error} />}
+        {warning && <div className="rounded-lg border border-signal-amber/30 bg-signal-amber/5 px-3 py-2 text-sm text-amber-800">{warning}</div>}
+
+        {!calendarId ? (
+          <EmptyState title="No calendar selected" description="Create a calendar first from the Calendars page." />
+        ) : loading ? (
+          <LoadingBlock />
+        ) : view === 'month' ? (
+          <MonthGrid anchor={anchor} byDate={byDate} onSelectDay={(d) => { setAnchor(d); setView('day'); }} />
+        ) : view === 'week' ? (
+          <WeekGrid rangeStart={rangeStart} byDate={byDate} peopleById={peopleById} canEdit={canEdit}
+            onCreate={openCreate} onEdit={openEdit} onDelete={setDeleteTarget} />
+        ) : (
+          <DayTimeline date={anchor} shifts={byDate[toISODate(anchor)] || []} peopleById={peopleById} canEdit={canEdit}
+            onCreate={() => openCreate(toISODate(anchor))} onEdit={openEdit} onDelete={setDeleteTarget} />
+        )}
+      </div>
+
+      <ShiftModal open={shiftModalOpen} onClose={() => setShiftModalOpen(false)} form={form} setForm={setForm}
+        people={people} editingShift={editingShift} onSave={handleSaveShift} saving={saving} />
+
+      <ConfirmDialog open={!!deleteTarget} title="Delete shift?" message="This removes the shift from the schedule."
+        confirmLabel="Delete" onConfirm={handleDeleteShift} onCancel={() => setDeleteTarget(null)} loading={saving} />
+
+      <AutoScheduleModal open={autoOpen} onClose={() => setAutoOpen(false)} calendarId={calendarId} people={people}
+        onCommitted={() => { setAutoOpen(false); loadAssignments(); }} />
+    </div>
+  );
+}
+
+function ShiftCard({ shift, peopleById, canEdit, onEdit, onDelete }) {
+  const disabled = isPast(shift.date);
+  return (
+    <div className="rounded-lg border border-line bg-white p-2.5 space-y-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-mono text-muted">{shift.start_time?.slice(0, 5)}–{shift.end_time?.slice(0, 5)}</span>
+        {canEdit && !disabled && (
+          <div className="flex items-center gap-0.5">
+            <button onClick={() => onEdit(shift)} className="p-1 rounded hover:bg-surface text-muted hover:text-ink"><Pencil size={12} /></button>
+            <button onClick={() => onDelete(shift)} className="p-1 rounded hover:bg-surface text-muted hover:text-signal-red"><Trash2 size={12} /></button>
+          </div>
+        )}
+      </div>
+      <EscalationChain assignment={shift} peopleById={peopleById} />
+    </div>
+  );
+}
+
+function WeekGrid({ rangeStart, byDate, peopleById, canEdit, onCreate, onEdit, onDelete }) {
+  const days = Array.from({ length: 7 }, (_, i) => addDays(rangeStart, i));
+  return (
+    <div className="grid grid-cols-7 gap-3">
+      {days.map((d) => {
+        const key = toISODate(d);
+        const shifts = byDate[key] || [];
+        return (
+          <div key={key} className="min-h-[10rem]">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-medium text-muted">{d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })}</p>
+              {canEdit && !isPast(key) && (
+                <button onClick={() => onCreate(key)} className="text-muted hover:text-ink"><Plus size={13} /></button>
+              )}
+            </div>
+            <div className="space-y-2">
+              {shifts.map((s) => <ShiftCard key={s.id} shift={s} peopleById={peopleById} canEdit={canEdit} onEdit={onEdit} onDelete={onDelete} />)}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DayTimeline({ date, shifts, peopleById, canEdit, onCreate, onEdit, onDelete }) {
+  return (
+    <Card className="p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-ink">{date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</h3>
+        {canEdit && !isPast(toISODate(date)) && <Button size="sm" onClick={onCreate}><Plus size={13} /> Add shift</Button>}
+      </div>
+      {shifts.length === 0 ? (
+        <EmptyState title="No shifts scheduled" />
+      ) : (
+        <div className="relative border border-line rounded-lg overflow-hidden">
+          {HOURS.map((h) => (
+            <div key={h} className="flex border-b border-line last:border-b-0 text-xs">
+              <div className="w-14 shrink-0 px-2 py-2 text-muted border-r border-line">{h.toString().padStart(2, '0')}:00</div>
+              <div className="flex-1 px-2 py-2 space-y-1">
+                {shifts.filter((s) => timeToMinutes(s.start_time) < (h + 1) * 60 && timeToMinutes(s.end_time) > h * 60).map((s) => (
+                  <div key={s.id} onClick={() => canEdit && !isPast(s.date) && onEdit(s)} className={`rounded-md bg-signal-amber/10 border border-signal-amber/30 px-2 py-1 ${canEdit ? 'cursor-pointer hover:bg-signal-amber/20' : ''}`}>
+                    <EscalationChain assignment={s} peopleById={peopleById} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function MonthGrid({ anchor, byDate, onSelectDay }) {
+  const first = startOfMonth(anchor);
+  const gridStart = startOfWeek(first);
+  const weeks = Array.from({ length: 6 }, (_, w) => Array.from({ length: 7 }, (_, d) => addDays(gridStart, w * 7 + d)));
+  return (
+    <Card className="p-4">
+      <div className="grid grid-cols-7 text-xs font-medium text-muted mb-2">
+        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => <div key={d} className="px-2 py-1">{d}</div>)}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {weeks.flat().map((d) => {
+          const key = toISODate(d);
+          const count = (byDate[key] || []).length;
+          const inMonth = d.getMonth() === anchor.getMonth();
+          return (
+            <button key={key} onClick={() => onSelectDay(d)}
+              className={`text-left rounded-lg border border-line p-2 h-20 hover:border-ink/30 ${inMonth ? 'bg-white' : 'bg-surface text-muted'}`}>
+              <span className="text-xs">{d.getDate()}</span>
+              {count > 0 && <span className="block mt-1 text-[10px] font-medium text-signal-amber">{count} shift{count > 1 ? 's' : ''}</span>}
+            </button>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+function ShiftModal({ open, onClose, form, setForm, people, editingShift, onSave, saving }) {
+  const personOptions = (
+    <>
+      <option value="">— None —</option>
+      {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+    </>
+  );
+  return (
+    <Modal open={open} onClose={onClose} title={editingShift ? 'Edit shift' : 'New shift'} size="lg"
+      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button onClick={onSave} loading={saving}>{editingShift ? 'Save' : 'Create'}</Button></>}>
+      <div className="space-y-4">
+        <div className="grid grid-cols-3 gap-4">
+          <Field label="Date"><Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} disabled={!!editingShift} /></Field>
+          <Field label="Start"><Input type="time" value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} disabled={!!editingShift} /></Field>
+          <Field label="End"><Input type="time" value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} disabled={!!editingShift} /></Field>
+        </div>
+        {editingShift && <p className="text-xs text-muted -mt-2">Date/time are locked once created — delete and recreate to reschedule.</p>}
+
+        <Field label="Mode">
+          <Select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value })} disabled={!!editingShift}>
+            <option value="escalation">Escalation chain</option>
+            <option value="broadcast">Broadcast pool</option>
+          </Select>
+        </Field>
+
+        {form.mode === 'escalation' ? (
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Primary"><Select value={form.primaryPersonId} onChange={(e) => setForm({ ...form, primaryPersonId: e.target.value })}>{personOptions}</Select></Field>
+            <Field label="Secondary"><Select value={form.secondaryPersonId} onChange={(e) => setForm({ ...form, secondaryPersonId: e.target.value })}>{personOptions}</Select></Field>
+            <Field label="Tertiary"><Select value={form.tertiaryPersonId} onChange={(e) => setForm({ ...form, tertiaryPersonId: e.target.value })}>{personOptions}</Select></Field>
+            <Field label="Default"><Select value={form.defaultPersonId} onChange={(e) => setForm({ ...form, defaultPersonId: e.target.value })}>{personOptions}</Select></Field>
+          </div>
+        ) : (
+          <p className="text-xs text-muted">Broadcast pool shifts can be configured after creation.</p>
+        )}
+
+        <Field label="Notes"><Textarea rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
+        <div className="flex items-center gap-4">
+          <Checkbox label="Notify via Slack" checked={form.notifySlack} onChange={(e) => setForm({ ...form, notifySlack: e.target.checked })} />
+          <Checkbox label="Notify via email" checked={form.notifyEmail} onChange={(e) => setForm({ ...form, notifyEmail: e.target.checked })} />
+        </div>
+
+        {!editingShift && (
+          <Field label="Repeat weekly for (months)" hint="0 = just this one shift, up to 36 months">
+            <Input type="number" min={0} max={36} value={form.replicateMonths} onChange={(e) => setForm({ ...form, replicateMonths: Number(e.target.value) })} />
+          </Field>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function AutoScheduleModal({ open, onClose, calendarId, people, onCommitted }) {
+  const [startDate, setStartDate] = useState(toISODate(new Date()));
+  const [endDate, setEndDate] = useState(toISODate(addDays(new Date(), 27)));
+  const [startTime, setStartTime] = useState('09:00');
+  const [endTime, setEndTime] = useState('17:00');
+  const [rotationDays, setRotationDays] = useState(7);
+  const [personIds, setPersonIds] = useState([]);
+  const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  function togglePerson(id) {
+    setPersonIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    setPreview(null);
+  }
+
+  const payload = { calendarId, startDate, endDate, startTime, endTime, personIds, rotationDays: Number(rotationDays) };
+
+  async function handlePreview() {
+    setLoading(true);
+    setError('');
+    try {
+      const data = await api.post('/auto-schedule/preview', payload);
+      setPreview(data.preview);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleCommit() {
+    setLoading(true);
+    setError('');
+    try {
+      await api.post('/auto-schedule/commit', payload);
+      onCommitted();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Auto-schedule (round robin)" size="lg"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          {!preview ? (
+            <Button onClick={handlePreview} loading={loading} disabled={personIds.length === 0}>Preview</Button>
+          ) : (
+            <Button onClick={handleCommit} loading={loading}>Commit {preview.length} shifts</Button>
+          )}
+        </>
+      }>
+      <div className="space-y-4">
+        {error && <ErrorBanner message={error} />}
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Start date"><Input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setPreview(null); }} /></Field>
+          <Field label="End date"><Input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setPreview(null); }} /></Field>
+          <Field label="Shift start"><Input type="time" value={startTime} onChange={(e) => { setStartTime(e.target.value); setPreview(null); }} /></Field>
+          <Field label="Shift end"><Input type="time" value={endTime} onChange={(e) => { setEndTime(e.target.value); setPreview(null); }} /></Field>
+          <Field label="Rotate every (days)"><Input type="number" min={1} value={rotationDays} onChange={(e) => { setRotationDays(e.target.value); setPreview(null); }} /></Field>
+        </div>
+        <Field label="Rotation pool">
+          <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+            {people.map((p) => (
+              <button key={p.id} type="button" onClick={() => togglePerson(p.id)}
+                className={`text-xs px-2.5 py-1 rounded-full border ${personIds.includes(p.id) ? 'bg-ink text-white border-ink' : 'border-line text-ink hover:bg-surface'}`}>
+                {p.name}
+              </button>
+            ))}
+          </div>
+        </Field>
+
+        {preview && (
+          <div className="border border-line rounded-lg max-h-48 overflow-y-auto">
+            <table className="w-full text-xs">
+              <thead><tr className="border-b border-line text-left text-muted"><th className="px-3 py-1.5">Date</th><th className="px-3 py-1.5">Primary</th><th className="px-3 py-1.5">Secondary</th></tr></thead>
+              <tbody className="divide-y divide-line">
+                {preview.map((slot) => (
+                  <tr key={slot.date}>
+                    <td className="px-3 py-1.5">{slot.date}</td>
+                    <td className="px-3 py-1.5">{people.find((p) => p.id === slot.primaryPersonId)?.name}</td>
+                    <td className="px-3 py-1.5">{people.find((p) => p.id === slot.secondaryPersonId)?.name}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}

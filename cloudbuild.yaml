@@ -1,0 +1,72 @@
+# Cloud Build CI/CD — for ongoing deploys after the initial bootstrap via
+# scripts/deploy.sh (which creates the infra and captures the first API URL).
+#
+# Wire this up with:
+#   gcloud builds triggers create github \
+#     --repo-name=<your-repo> --repo-owner=<you> --branch-pattern='^main$' \
+#     --build-config=cloudbuild.yaml
+#
+# Substitution _API_URL should be set to the deployed API's URL (find it with
+# `gcloud run services describe oncall-pro-api --format='value(status.url)'`)
+# so the frontend build bakes in the right VITE_API_URL. Set it as a trigger
+# substitution in the Cloud Build console/CLI — it won't change often.
+
+steps:
+  # ── API ────────────────────────────────────────────────────────────────
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_APP_NAME}-images/api:${SHORT_SHA}', './backend']
+    id: build-api
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_APP_NAME}-images/api:${SHORT_SHA}']
+    id: push-api
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - '${_APP_NAME}-api'
+      - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_APP_NAME}-images/api:${SHORT_SHA}'
+      - '--region=${_REGION}'
+      - '--quiet'
+    id: deploy-api
+
+  # ── Web ────────────────────────────────────────────────────────────────
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - build
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_APP_NAME}-images/web:${SHORT_SHA}'
+      - '--build-arg'
+      - 'VITE_API_URL=${_API_URL}'
+      - './frontend'
+    id: build-web
+    waitFor: ['deploy-api']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_APP_NAME}-images/web:${SHORT_SHA}']
+    id: push-web
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - '${_APP_NAME}-web'
+      - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_APP_NAME}-images/web:${SHORT_SHA}'
+      - '--region=${_REGION}'
+      - '--quiet'
+    id: deploy-web
+
+substitutions:
+  _REGION: us-central1
+  _APP_NAME: oncall-pro
+  _API_URL: '' # set this in the trigger config to your deployed API URL
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_APP_NAME}-images/api:${SHORT_SHA}'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_APP_NAME}-images/web:${SHORT_SHA}'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
