@@ -13,8 +13,8 @@ import LogoUpload from '../components/LogoUpload.jsx';
 const DETAIL_FIELDS = ['name', 'account_number', 'phone', 'email', 'address', 'website', 'primary_contact', 'call_messages_url'];
 const BRANDING_FIELDS = ['name_override', 'tagline', 'primary_color', 'accent_color', 'description', 'message_html'];
 
-// Read-only display for a saved record — the detail panel defaults to this
-// and only switches to editable fields while editMode is on.
+// Read-only display for a saved record — the modal defaults to this and
+// only switches to editable fields while editMode is on.
 function ReadOnlyField({ label, value, swatch }) {
   return (
     <div>
@@ -40,8 +40,11 @@ function ReadOnlyImage({ label, url }) {
 
 // Customers are flat — no more hierarchy tree/Move/per-level "Add child"
 // (see migrations/013_tas_customer_model.sql). Customer records themselves
-// are Global-Admin-only; a Customer Admin manages their own Customer's
-// People/Calendars/Schedule, not the Customer record.
+// are Global-Admin-only to edit; a Customer Admin/User can still view their
+// own single Customer's details read-only (GET /organizations already
+// scopes non-Global-Admins to just their own row) — the row-card list below
+// preserves that: clicking a row opens the modal read-only for everyone,
+// Edit/Delete are only shown to canManage.
 export default function Customers() {
   const { user } = useAuth();
   const canManage = isGlobalAdmin(user);
@@ -49,15 +52,17 @@ export default function Customers() {
   const [orgs, setOrgs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+  const [saving, setSaving] = useState(false);
+
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [form, setForm] = useState(null);
   const [editMode, setEditMode] = useState(false);
-  const [search, setSearch] = useState('');
-  const [saving, setSaving] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   async function loadList() {
@@ -65,7 +70,6 @@ export default function Customers() {
     try {
       const data = await api.get('/organizations');
       setOrgs(data.organizations);
-      if (!selectedId && data.organizations[0]) setSelectedId(data.organizations[0].id);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -75,16 +79,24 @@ export default function Customers() {
 
   useEffect(() => { loadList(); }, []);
 
-  useEffect(() => {
-    if (!selectedId) return;
-    setEditMode(false);
-    api.get(`/organizations/${selectedId}`).then((data) => {
-      setDetail(data.organization);
-      setForm(data.organization);
-    }).catch((err) => setError(err.message));
-  }, [selectedId]);
-
   const filtered = sortByName(filterBySearch(orgs, search));
+
+  // The list row already has every field (GET /organizations is SELECT *),
+  // so opening the modal is just populating state from it — no per-row
+  // detail fetch needed.
+  function openDetail(org, startEditing = false) {
+    setSelectedId(org.id);
+    setDetail(org);
+    setForm(org);
+    setEditMode(startEditing);
+  }
+
+  function closeDetail() {
+    setSelectedId(null);
+    setDetail(null);
+    setForm(null);
+    setEditMode(false);
+  }
 
   function handleCancelEdit() {
     setForm(detail);
@@ -119,8 +131,8 @@ export default function Customers() {
       const { organization } = await api.post('/organizations', { name: newName });
       setNewName('');
       setCreateOpen(false);
-      await loadList();
-      setSelectedId(organization.id);
+      setOrgs((prev) => sortByName([...prev, organization]));
+      openDetail(organization, true);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -131,9 +143,10 @@ export default function Customers() {
   async function handleDelete() {
     setSaving(true);
     try {
-      await api.del(`/organizations/${selectedId}`);
+      await api.del(`/organizations/${deleteTarget.id}`);
       setDeleteOpen(false);
-      setSelectedId(null);
+      setDeleteTarget(null);
+      if (selectedId === deleteTarget.id) closeDetail();
       await loadList();
     } catch (err) {
       setError(err.message);
@@ -142,14 +155,13 @@ export default function Customers() {
     }
   }
 
-  async function handleRestore() {
+  async function handleRestore(org) {
     setSaving(true);
     try {
-      await api.post(`/organizations/${selectedId}/restore`);
-      await loadList();
-      const data = await api.get(`/organizations/${selectedId}`);
-      setDetail(data.organization);
-      setForm(data.organization);
+      await api.post(`/organizations/${org.id}/restore`);
+      const restored = { ...org, is_deleted: false, deleted_at: null, deleted_by: null };
+      setOrgs((prev) => prev.map((o) => (o.id === org.id ? restored : o)));
+      if (selectedId === org.id) { setDetail(restored); setForm(restored); }
     } finally {
       setSaving(false);
     }
@@ -157,164 +169,178 @@ export default function Customers() {
 
   return (
     <div>
-      <PageHeader title="Customers" description="Each Customer's own People, Calendars, and Schedule." />
-      <div className="flex" style={{ height: 'calc(100vh - 73px)' }}>
-        <div className="w-80 shrink-0 border-r border-line flex flex-col">
-          <div className="p-3 border-b border-line space-y-2">
-            <div className="relative">
-              <Search size={14} className="absolute left-2.5 top-2.5 text-muted" />
-              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search…" className="pl-8" />
-            </div>
-            {canManage && (
-              <Button size="sm" className="w-full" onClick={() => { setNewName(''); setCreateOpen(true); }}>
-                <Plus size={13} /> New customer
-              </Button>
-            )}
-          </div>
-          <div className="flex-1 overflow-y-auto p-2">
-            {loading ? <LoadingBlock /> : filtered.length === 0 ? (
-              <EmptyState title="No customers yet" description={canManage ? 'Create your first Customer to get started.' : undefined} />
-            ) : (
-              filtered.map((org) => (
-                <button
-                  key={org.id}
-                  onClick={() => setSelectedId(org.id)}
-                  className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm text-left hover:bg-surface ${
-                    selectedId === org.id ? 'bg-signal-amber/10 text-ink font-medium' : 'text-ink'
-                  } ${org.is_deleted ? 'opacity-50' : ''}`}
-                >
-                  <Building2 size={13} className="text-muted shrink-0" />
-                  <span className="truncate">{org.name}</span>
-                  {org.is_deleted && <Badge tone="red" className="ml-auto shrink-0">Deleted</Badge>}
-                </button>
-              ))
-            )}
-          </div>
+      <PageHeader
+        title="Customers"
+        description="Each Customer's own People, Calendars, and Schedule."
+        actions={canManage && (
+          <Button onClick={() => { setNewName(''); setCreateOpen(true); }}>
+            <Plus size={14} /> New customer
+          </Button>
+        )}
+      />
+      <div className="p-8 space-y-4">
+        {error && <ErrorBanner message={error} />}
+        <div className="relative max-w-sm">
+          <Search size={14} className="absolute left-2.5 top-2.5 text-muted" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search customers…" className="pl-8" />
         </div>
 
-        <div className="flex-1 overflow-y-auto p-8">
-          {error && <ErrorBanner message={error} className="mb-4" />}
-          {!detail || !form ? (
-            <EmptyState title="Select a customer" />
-          ) : (
-            <div className="max-w-2xl space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-semibold text-ink">{detail.name}</h2>
-                  {detail.is_deleted && <Badge tone="red">Deleted</Badge>}
+        {loading ? <LoadingBlock /> : filtered.length === 0 ? (
+          <EmptyState title="No customers yet" description={canManage ? 'Create your first Customer to get started.' : undefined} />
+        ) : (
+          <div className="space-y-3">
+            {filtered.map((org) => (
+              <Card
+                key={org.id}
+                className={`p-4 flex items-center gap-4 cursor-pointer hover:border-signal-amber/40 transition-colors ${org.is_deleted ? 'opacity-60' : ''}`}
+                onClick={() => openDetail(org)}
+              >
+                <div className="h-10 w-10 rounded-lg bg-surface border border-line flex items-center justify-center shrink-0">
+                  <Building2 size={18} className="text-ink" />
                 </div>
-                {canManage && !editMode && (
+                <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    {detail.is_deleted ? (
-                      <Button variant="secondary" onClick={handleRestore} loading={saving}><RotateCcw size={14} /> Restore</Button>
+                    <span className="font-semibold text-ink truncate">{org.name}</span>
+                    {org.account_number && (
+                      <span className="text-xs text-muted font-mono bg-surface border border-line rounded px-1.5 py-0.5 shrink-0">{org.account_number}</span>
+                    )}
+                    {org.is_deleted && <Badge tone="red">Deleted</Badge>}
+                  </div>
+                  {(org.phone || org.email) && (
+                    <p className="text-xs text-muted truncate mt-0.5">{[org.phone, org.email].filter(Boolean).join(' · ')}</p>
+                  )}
+                </div>
+                {canManage && (
+                  <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    {org.is_deleted ? (
+                      <Button size="sm" variant="secondary" onClick={() => handleRestore(org)} loading={saving}><RotateCcw size={13} /></Button>
                     ) : (
                       <>
-                        <Button variant="secondary" onClick={() => setEditMode(true)}><Pencil size={14} /> Edit</Button>
-                        <Button variant="danger" onClick={() => setDeleteOpen(true)}><Trash2 size={14} /> Delete</Button>
+                        <Button size="sm" variant="secondary" onClick={() => openDetail(org, true)}><Pencil size={13} /></Button>
+                        <Button size="sm" variant="danger" onClick={() => { setDeleteTarget(org); setDeleteOpen(true); }}><Trash2 size={13} /></Button>
                       </>
                     )}
                   </div>
                 )}
-              </div>
-
-              <Card className="p-5 space-y-4">
-                <h3 className="text-sm font-semibold text-ink">Details</h3>
-                {editMode ? (
-                  <>
-                    <div className="grid grid-cols-2 gap-4">
-                      <Field label="Name"><Input value={form.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
-                      <Field label="Account number"><Input value={form.account_number || ''} onChange={(e) => setForm({ ...form, account_number: e.target.value })} /></Field>
-                      <Field label="Phone"><Input value={form.phone || ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
-                      <Field label="Email"><Input value={form.email || ''} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
-                      <Field label="Website"><Input value={form.website || ''} onChange={(e) => setForm({ ...form, website: e.target.value })} /></Field>
-                      <Field label="Primary contact"><Input value={form.primary_contact || ''} onChange={(e) => setForm({ ...form, primary_contact: e.target.value })} /></Field>
-                    </div>
-                    <Field label="Address"><Input value={form.address || ''} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
-                    <Field label="Call messages URL"><Input value={form.call_messages_url || ''} onChange={(e) => setForm({ ...form, call_messages_url: e.target.value })} /></Field>
-                    <Checkbox
-                      label="Contact edits require Global Admin approval"
-                      checked={!!form.contact_edit_requires_approval}
-                      onChange={(e) => setForm({ ...form, contact_edit_requires_approval: e.target.checked })}
-                    />
-                  </>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-2 gap-4">
-                      <ReadOnlyField label="Name" value={detail.name} />
-                      <ReadOnlyField label="Account number" value={detail.account_number} />
-                      <ReadOnlyField label="Phone" value={detail.phone} />
-                      <ReadOnlyField label="Email" value={detail.email} />
-                      <ReadOnlyField label="Website" value={detail.website} />
-                      <ReadOnlyField label="Primary contact" value={detail.primary_contact} />
-                    </div>
-                    <ReadOnlyField label="Address" value={detail.address} />
-                    <ReadOnlyField label="Call messages URL" value={detail.call_messages_url} />
-                    <ReadOnlyField label="Contact edits require approval" value={detail.contact_edit_requires_approval ? 'Yes' : 'No'} />
-                  </>
-                )}
               </Card>
-
-              <Card className="p-5 space-y-4">
-                <h3 className="text-sm font-semibold text-ink">Branding <span className="text-xs font-normal text-muted">(falls back to TAS-wide settings for anything not set here)</span></h3>
-                {editMode ? (
-                  <>
-                    <Field label="Logo">
-                      <LogoUpload organizationId={selectedId} imageUrl={form.logo_url} kind="logo"
-                        onUploaded={(url) => setForm({ ...form, logo_url: url })} />
-                    </Field>
-                    <Field label="Favicon">
-                      <LogoUpload organizationId={selectedId} imageUrl={form.favicon_url} kind="favicon"
-                        onUploaded={(url) => setForm({ ...form, favicon_url: url })} />
-                    </Field>
-                    <div className="grid grid-cols-2 gap-4">
-                      <Field label="Display name override"><Input value={form.name_override || ''} onChange={(e) => setForm({ ...form, name_override: e.target.value })} /></Field>
-                      <Field label="Tagline"><Input value={form.tagline || ''} onChange={(e) => setForm({ ...form, tagline: e.target.value })} /></Field>
-                      <Field label="Primary color"><Input type="color" value={form.primary_color || '#1B2333'} onChange={(e) => setForm({ ...form, primary_color: e.target.value })} /></Field>
-                      <Field label="Accent color"><Input type="color" value={form.accent_color || '#F5A623'} onChange={(e) => setForm({ ...form, accent_color: e.target.value })} /></Field>
-                    </div>
-                    <Field label="Description"><Textarea rows={2} value={form.description || ''} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
-                    <Field label="Message HTML" hint="Shown on public-facing branded pages"><Textarea rows={3} value={form.message_html || ''} onChange={(e) => setForm({ ...form, message_html: e.target.value })} /></Field>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex gap-6">
-                      <ReadOnlyImage label="Logo" url={detail.logo_url} />
-                      <ReadOnlyImage label="Favicon" url={detail.favicon_url} />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <ReadOnlyField label="Display name override" value={detail.name_override} />
-                      <ReadOnlyField label="Tagline" value={detail.tagline} />
-                      <ReadOnlyField label="Primary color" value={detail.primary_color} swatch />
-                      <ReadOnlyField label="Accent color" value={detail.accent_color} swatch />
-                    </div>
-                    <ReadOnlyField label="Description" value={detail.description} />
-                    {detail.message_html && (
-                      <div>
-                        <p className="text-xs font-medium text-ink mb-1">Message HTML</p>
-                        <div className="text-sm text-ink border border-line rounded-lg p-3" dangerouslySetInnerHTML={{ __html: detail.message_html }} />
-                      </div>
-                    )}
-                  </>
-                )}
-              </Card>
-
-              {editMode && (
-                <div className="flex justify-end gap-2">
-                  <Button variant="secondary" onClick={handleCancelEdit} disabled={saving}>Cancel</Button>
-                  <Button onClick={handleSave} loading={saving}>Save changes</Button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
+
+      <Modal
+        open={!!detail}
+        onClose={closeDetail}
+        title={detail?.name || ''}
+        size="lg"
+        footer={
+          editMode ? (
+            <>
+              <Button variant="secondary" onClick={handleCancelEdit} disabled={saving}>Cancel</Button>
+              <Button onClick={handleSave} loading={saving}>Save changes</Button>
+            </>
+          ) : (
+            <>
+              <Button variant="secondary" onClick={closeDetail}>Close</Button>
+              {canManage && !detail?.is_deleted && (
+                <Button onClick={() => setEditMode(true)}><Pencil size={14} /> Edit</Button>
+              )}
+            </>
+          )
+        }
+      >
+        {detail && form && (
+          <div className="space-y-6">
+            <Card className="p-5 space-y-4">
+              <h3 className="text-sm font-semibold text-ink">Details</h3>
+              {editMode ? (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field label="Name"><Input value={form.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
+                    <Field label="Account number"><Input value={form.account_number || ''} onChange={(e) => setForm({ ...form, account_number: e.target.value })} /></Field>
+                    <Field label="Phone"><Input value={form.phone || ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
+                    <Field label="Email"><Input value={form.email || ''} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
+                    <Field label="Website"><Input value={form.website || ''} onChange={(e) => setForm({ ...form, website: e.target.value })} /></Field>
+                    <Field label="Primary contact"><Input value={form.primary_contact || ''} onChange={(e) => setForm({ ...form, primary_contact: e.target.value })} /></Field>
+                  </div>
+                  <Field label="Address"><Input value={form.address || ''} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
+                  <Field label="Call messages URL"><Input value={form.call_messages_url || ''} onChange={(e) => setForm({ ...form, call_messages_url: e.target.value })} /></Field>
+                  <Checkbox
+                    label="Contact edits require Global Admin approval"
+                    checked={!!form.contact_edit_requires_approval}
+                    onChange={(e) => setForm({ ...form, contact_edit_requires_approval: e.target.checked })}
+                  />
+                </>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <ReadOnlyField label="Name" value={detail.name} />
+                    <ReadOnlyField label="Account number" value={detail.account_number} />
+                    <ReadOnlyField label="Phone" value={detail.phone} />
+                    <ReadOnlyField label="Email" value={detail.email} />
+                    <ReadOnlyField label="Website" value={detail.website} />
+                    <ReadOnlyField label="Primary contact" value={detail.primary_contact} />
+                  </div>
+                  <ReadOnlyField label="Address" value={detail.address} />
+                  <ReadOnlyField label="Call messages URL" value={detail.call_messages_url} />
+                  <ReadOnlyField label="Contact edits require approval" value={detail.contact_edit_requires_approval ? 'Yes' : 'No'} />
+                </>
+              )}
+            </Card>
+
+            <Card className="p-5 space-y-4">
+              <h3 className="text-sm font-semibold text-ink">Branding <span className="text-xs font-normal text-muted">(falls back to TAS-wide settings for anything not set here)</span></h3>
+              {editMode ? (
+                <>
+                  <Field label="Logo">
+                    <LogoUpload organizationId={selectedId} imageUrl={form.logo_url} kind="logo"
+                      onUploaded={(url) => setForm({ ...form, logo_url: url })} />
+                  </Field>
+                  <Field label="Favicon">
+                    <LogoUpload organizationId={selectedId} imageUrl={form.favicon_url} kind="favicon"
+                      onUploaded={(url) => setForm({ ...form, favicon_url: url })} />
+                  </Field>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field label="Display name override"><Input value={form.name_override || ''} onChange={(e) => setForm({ ...form, name_override: e.target.value })} /></Field>
+                    <Field label="Tagline"><Input value={form.tagline || ''} onChange={(e) => setForm({ ...form, tagline: e.target.value })} /></Field>
+                    <Field label="Primary color"><Input type="color" value={form.primary_color || '#1B2333'} onChange={(e) => setForm({ ...form, primary_color: e.target.value })} /></Field>
+                    <Field label="Accent color"><Input type="color" value={form.accent_color || '#F5A623'} onChange={(e) => setForm({ ...form, accent_color: e.target.value })} /></Field>
+                  </div>
+                  <Field label="Description"><Textarea rows={2} value={form.description || ''} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
+                  <Field label="Message HTML" hint="Shown on public-facing branded pages"><Textarea rows={3} value={form.message_html || ''} onChange={(e) => setForm({ ...form, message_html: e.target.value })} /></Field>
+                </>
+              ) : (
+                <>
+                  <div className="flex gap-6">
+                    <ReadOnlyImage label="Logo" url={detail.logo_url} />
+                    <ReadOnlyImage label="Favicon" url={detail.favicon_url} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <ReadOnlyField label="Display name override" value={detail.name_override} />
+                    <ReadOnlyField label="Tagline" value={detail.tagline} />
+                    <ReadOnlyField label="Primary color" value={detail.primary_color} swatch />
+                    <ReadOnlyField label="Accent color" value={detail.accent_color} swatch />
+                  </div>
+                  <ReadOnlyField label="Description" value={detail.description} />
+                  {detail.message_html && (
+                    <div>
+                      <p className="text-xs font-medium text-ink mb-1">Message HTML</p>
+                      <div className="text-sm text-ink border border-line rounded-lg p-3" dangerouslySetInnerHTML={{ __html: detail.message_html }} />
+                    </div>
+                  )}
+                </>
+              )}
+            </Card>
+          </div>
+        )}
+      </Modal>
 
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="New customer"
         footer={<><Button variant="secondary" onClick={() => setCreateOpen(false)}>Cancel</Button><Button onClick={handleCreate} loading={saving} disabled={!newName.trim()}>Create</Button></>}>
         <Field label="Name"><Input value={newName} onChange={(e) => setNewName(e.target.value)} autoFocus /></Field>
       </Modal>
 
-      <ConfirmDialog open={deleteOpen} title="Delete customer?" message={`This soft-deletes "${detail?.name}" and its People/Calendars/Schedule. It can be restored later.`}
+      <ConfirmDialog open={deleteOpen} title="Delete customer?" message={`This soft-deletes "${deleteTarget?.name}" and its People/Calendars/Schedule. It can be restored later.`}
         confirmLabel="Delete" onConfirm={handleDelete} onCancel={() => setDeleteOpen(false)} loading={saving} />
     </div>
   );
