@@ -14,6 +14,14 @@ export const ROLE_LABELS = {
   user: 'User',
 };
 
+// Style guide's Role Badges section: Global Admin=purple, Customer Admin
+// (née Org Admin)=blue, User (née Regular User)=green.
+export const ROLE_BADGE_TONE = {
+  global_admin: 'purple',
+  customer_admin: 'blue',
+  user: 'green',
+};
+
 export function roleRank(user) {
   return ROLE_RANK[user?.role] ?? -1;
 }

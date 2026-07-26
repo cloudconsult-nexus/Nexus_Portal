@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Send, Ban } from 'lucide-react';
 import { api } from '../lib/api.js';
-import { ROLE_LABELS } from '../lib/roles.js';
+import { ROLE_LABELS, ROLE_BADGE_TONE } from '../lib/roles.js';
 import { PageHeader, Card, Button, Table, Badge, LoadingBlock, EmptyState, ErrorBanner } from '../components/ui.jsx';
 
 const STATUS_TONE = { pending: 'amber', accepted: 'green', revoked: 'red', expired: 'neutral' };
@@ -53,7 +53,7 @@ export default function Invitations() {
                 <tr key={inv.id} className="hover:bg-surface">
                   <td className="px-4 py-2.5 font-medium text-ink">{inv.name}</td>
                   <td className="px-4 py-2.5 text-muted">{inv.email}</td>
-                  <td className="px-4 py-2.5"><Badge>{ROLE_LABELS[inv.role] || inv.role}</Badge></td>
+                  <td className="px-4 py-2.5"><Badge tone={ROLE_BADGE_TONE[inv.role]}>{ROLE_LABELS[inv.role] || inv.role}</Badge></td>
                   <td className="px-4 py-2.5"><Badge tone={STATUS_TONE[inv.status]}>{inv.status}</Badge></td>
                   <td className="px-4 py-2.5 text-muted text-xs">{new Date(inv.expires_at).toLocaleDateString()}</td>
                   <td className="px-4 py-2.5">

@@ -15,6 +15,7 @@ export default {
           green: '#22C55E',  // coverage / success
           red: '#EF4444',    // escalation / critical
           blue: '#3B82F6',   // informational
+          purple: '#A855F7', // Global Admin role badge
         },
       },
       fontFamily: {

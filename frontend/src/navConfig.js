@@ -1,6 +1,6 @@
 import {
-  LayoutGrid, Building2, UserRound, CalendarDays, MessageSquare, ShieldCheck,
-  CalendarClock, RefreshCw, BarChart3, ScrollText, Settings as SettingsIcon, Radio, Palette, MailPlus, UploadCloud, LayoutDashboard, HelpCircle, Building,
+  LayoutGrid, LayoutDashboard, Building2, Users, Calendar, Grid3x3, MessageSquare, ShieldCheck,
+  ArrowLeftRight, BarChart3, Shield, Settings as SettingsIcon, Radio, Palette, MailPlus, UploadCloud, BookOpen, Building,
 } from 'lucide-react';
 import { isAdmin, isGlobalAdmin, canViewMessages } from './lib/roles.js';
 
@@ -10,9 +10,9 @@ import { isAdmin, isGlobalAdmin, canViewMessages } from './lib/roles.js';
 // against these arrays instead of a re-implemented copy — see
 // frontend/tests/navVisibility.test.js and scripts/generate-role-docs.mjs.
 export const topNav = [
-  { to: '/', label: 'Dashboard', icon: LayoutGrid, end: true },
+  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/customers', label: 'Customers', icon: Building2, adminOnly: true },
-  { to: '/people', label: 'People', icon: UserRound },
+  { to: '/people', label: 'People', icon: Users },
   { to: '/invitations', label: 'Invitations', icon: MailPlus, adminOnly: true },
   { to: '/bulk-import', label: 'Bulk Import', icon: UploadCloud, adminOnly: true },
   { to: '/customer-messages', label: 'Customer Messages', icon: MessageSquare, messagingOnly: true },
@@ -21,17 +21,17 @@ export const topNav = [
   { to: '/status-alerts', label: 'Status Alerts', icon: Radio },
 ];
 export const onCallProNav = [
-  { to: '/calendars', label: 'Calendars', icon: CalendarDays },
-  { to: '/schedule', label: 'Schedules', icon: CalendarClock },
-  { to: '/shift-swaps', label: 'Shift Swaps', icon: RefreshCw },
+  { to: '/calendars', label: 'Calendars', icon: Grid3x3 },
+  { to: '/schedule', label: 'Schedules', icon: Calendar },
+  { to: '/shift-swaps', label: 'Shift Swaps', icon: ArrowLeftRight },
   { to: '/oncall-reports', label: 'OnCall Reports', icon: BarChart3, adminOnly: true },
 ];
 export const bottomNav = [
-  { to: '/audit-logs', label: 'Audit Logs', icon: ScrollText, adminOnly: true },
+  { to: '/audit-logs', label: 'Audit Logs', icon: Shield, adminOnly: true },
   { to: '/branding', label: 'Branding', icon: Palette, adminOnly: true },
-  { to: '/report-mappings', label: 'Report Mappings', icon: LayoutDashboard, globalAdminOnly: true },
+  { to: '/report-mappings', label: 'Report Mappings', icon: LayoutGrid, globalAdminOnly: true },
   { to: '/tas-settings', label: 'TAS Settings', icon: Building, globalAdminOnly: true },
-  { to: '/help/getting-started', label: 'Help', icon: HelpCircle },
+  { to: '/help/getting-started', label: 'Help', icon: BookOpen },
   { to: '/settings', label: 'Settings', icon: SettingsIcon },
 ];
 

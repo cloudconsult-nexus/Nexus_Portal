@@ -18,7 +18,7 @@ export function PageHeader({ title, description, actions }) {
   return (
     <div className="flex items-start justify-between gap-4 px-8 py-6 border-b border-line bg-card">
       <div>
-        <h1 className="text-xl font-semibold text-ink">{title}</h1>
+        <h1 className="text-3xl font-bold text-ink">{title}</h1>
         {description && <p className="text-sm text-muted mt-0.5">{description}</p>}
       </div>
       {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
@@ -110,6 +110,7 @@ const BADGE_TONES = {
   amber: 'bg-signal-amber/10 text-amber-700 border-signal-amber/20',
   red: 'bg-signal-red/10 text-signal-red border-signal-red/20',
   blue: 'bg-signal-blue/10 text-signal-blue border-signal-blue/20',
+  purple: 'bg-signal-purple/10 text-signal-purple border-signal-purple/20',
 };
 
 export function Badge({ tone = 'neutral', children, className = '' }) {
@@ -159,7 +160,7 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4" onClick={onClose}>
       <div
-        className={`w-full ${widthCls} rounded-xl bg-card shadow-card border border-line max-h-[90vh] flex flex-col`}
+        className={`w-full ${widthCls} rounded-lg bg-card shadow-card border border-line max-h-[90vh] flex flex-col`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-line">
@@ -195,7 +196,7 @@ export function Table({ columns, children, className = '' }) {
         <thead>
           <tr className="border-b border-line text-left">
             {columns.map((col, i) => (
-              <th key={col.key ?? (typeof col === 'string' ? col : i)} className="px-4 py-2.5 font-medium text-muted whitespace-nowrap">
+              <th key={col.key ?? (typeof col === 'string' ? col : i)} className="px-4 py-2.5 text-[10px] font-medium text-muted whitespace-nowrap">
                 {col.label ?? col}
               </th>
             ))}

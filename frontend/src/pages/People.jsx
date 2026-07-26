@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, Search } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../context/AuthContext.jsx';
-import { isAdmin, ROLE_LABELS } from '../lib/roles.js';
+import { isAdmin, ROLE_LABELS, ROLE_BADGE_TONE } from '../lib/roles.js';
 import { PageHeader, Card, Button, Input, Field, Select, Checkbox, Table, Modal, ConfirmDialog, LoadingBlock, EmptyState, ErrorBanner, Badge } from '../components/ui.jsx';
 import OrganizationSelector from '../components/OrganizationSelector.jsx';
 import PhotoUpload from '../components/PhotoUpload.jsx';
@@ -119,7 +119,7 @@ export default function People() {
                     </div>
                   </td>
                   <td className="px-4 py-2.5 font-medium text-ink">{p.name}</td>
-                  <td className="px-4 py-2.5"><Badge>{ROLE_LABELS[p.role]}</Badge></td>
+                  <td className="px-4 py-2.5"><Badge tone={ROLE_BADGE_TONE[p.role]}>{ROLE_LABELS[p.role]}</Badge></td>
                   <td className="px-4 py-2.5 text-muted">{p.email || '—'}</td>
                   <td className="px-4 py-2.5 text-muted font-mono text-xs">{p.primary_phone || '—'}</td>
                   <td className="px-4 py-2.5 text-muted">{p.department || '—'}</td>

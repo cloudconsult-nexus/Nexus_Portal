@@ -39,7 +39,7 @@ function NavList({ items, user, accentColor }) {
   return filterNavItems(items, user)
     .map(({ to, label, icon: Icon, end }) => (
       <NavLink key={to} to={to} end={end} className={navLinkClass} style={({ isActive }) => (isActive ? { borderLeftColor: accentColor } : undefined)}>
-        <Icon size={17} strokeWidth={2} />
+        <Icon size={17} strokeWidth={1.5} />
         {label}
       </NavLink>
     ));
