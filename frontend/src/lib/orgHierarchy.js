@@ -38,6 +38,14 @@ export function buildTree(orgs) {
   return sortByName(roots);
 }
 
+// Total nested descendants (children, grandchildren, ...) of a tree node
+// from buildTree — the Customers page tile uses this to show how much is
+// nested under a Customer, without a second pass over the flat list the
+// way getDescendantIds below needs.
+export function countDescendants(node) {
+  return node.children.reduce((sum, child) => sum + 1 + countDescendants(child), 0);
+}
+
 // Every descendant id of `id`, given the flat list — used to keep a
 // Customer from being set as its own descendant's parent (would create a
 // cycle; the backend re-checks this too, this is just immediate UI feedback).

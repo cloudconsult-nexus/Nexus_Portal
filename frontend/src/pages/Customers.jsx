@@ -3,7 +3,7 @@ import { Plus, Trash2, RotateCcw, Building2, Search, Pencil, ChevronRight, Chevr
 import { api } from '../lib/api.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { isGlobalAdmin, isAdmin } from '../lib/roles.js';
-import { sortByName, findOrg, buildTree, filterTree, flattenTree, getDescendantIds } from '../lib/orgHierarchy.js';
+import { sortByName, findOrg, buildTree, filterTree, flattenTree, getDescendantIds, countDescendants } from '../lib/orgHierarchy.js';
 import {
   PageHeader, Card, Button, Input, Field, Select, Textarea, Checkbox, Modal, ConfirmDialog,
   LoadingBlock, EmptyState, ErrorBanner, Badge,
@@ -256,6 +256,9 @@ export default function Customers() {
                     <span className="font-semibold text-ink truncate">{org.name}</span>
                     {org.account_number && (
                       <span className="text-xs text-muted font-mono bg-surface border border-line rounded px-1.5 py-0.5 shrink-0">{org.account_number}</span>
+                    )}
+                    {hasChildren && (
+                      <Badge tone="blue">{countDescendants(org)} nested</Badge>
                     )}
                     {org.is_deleted && <Badge tone="red">Deleted</Badge>}
                   </div>
