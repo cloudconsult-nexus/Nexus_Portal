@@ -12,6 +12,15 @@ router.use(requireAuth, auditContext);
 
 const MAX_REPLICATION_MONTHS = 36;
 
+// The frontend's person selects use '' for "— None —" (a plain HTML <select>
+// has no null option value) — coerce that to null before it ever reaches
+// zod's .uuid() check or a query parameter, otherwise an unset Secondary/
+// Tertiary tier throws instead of validating as "not set".
+function emptyToNull(v) {
+  return v === '' ? null : v;
+}
+const PERSON_TIER_FIELDS = new Set(['primary_person_id', 'secondary_person_id', 'tertiary_person_id', 'default_person_id']);
+
 // Assignments have no organization_id of their own — scope via the
 // calendar they belong to. Returns the calendar's organization_id (for
 // audit/other use) or null + sends the response itself if not found/
@@ -50,16 +59,49 @@ const createSchema = z.object({
   startTime: z.string(),
   endTime: z.string(),
   mode: z.enum(['escalation', 'broadcast']).default('escalation'),
-  primaryPersonId: z.string().uuid().nullable().optional(),
-  secondaryPersonId: z.string().uuid().nullable().optional(),
-  tertiaryPersonId: z.string().uuid().nullable().optional(),
-  defaultPersonId: z.string().uuid().nullable().optional(),
+  // Primary and Default are the only mandatory tiers for scheduling — they
+  // may point at the same person. Secondary/Tertiary stay optional for both
+  // modes (escalation uses them for sequential timeout-based escalation;
+  // broadcast uses whichever are set as additional simultaneous pool members).
+  primaryPersonId: z.preprocess(emptyToNull, z.string().uuid()),
+  defaultPersonId: z.preprocess(emptyToNull, z.string().uuid()),
+  secondaryPersonId: z.preprocess(emptyToNull, z.string().uuid().nullable().optional()),
+  tertiaryPersonId: z.preprocess(emptyToNull, z.string().uuid().nullable().optional()),
   broadcastPool: z.array(z.string().uuid()).optional(),
   notes: z.string().optional(),
   notifySlack: z.boolean().optional(),
   notifyEmail: z.boolean().optional(),
   replicateMonths: z.number().int().min(0).max(MAX_REPLICATION_MONTHS).optional(),
+  // When a prior attempt came back with requiresConfirmation, resubmitting
+  // with this set to true is the scheduler's explicit approval to create the
+  // assignment anyway, double-booking the conflicting person(s) on purpose.
+  confirmConflicts: z.boolean().optional(),
 });
+
+// Checks every filled tier (primary/secondary/tertiary/default) for a given
+// shift window against the rest of the schedule, tagging each hit with which
+// tier it came from. A person can legitimately fill more than one tier (e.g.
+// primary === default), so results are cached per person to avoid redundant
+// lookups and duplicate conflict entries.
+async function findAllConflicts(tiers, date, startTime, endTime, excludeAssignmentId) {
+  const entries = [
+    ['primary', tiers.primaryPersonId],
+    ['secondary', tiers.secondaryPersonId],
+    ['tertiary', tiers.tertiaryPersonId],
+    ['default', tiers.defaultPersonId],
+  ].filter(([, id]) => id);
+
+  const cache = new Map();
+  const results = [];
+  for (const [tier, personId] of entries) {
+    if (!cache.has(personId)) {
+      cache.set(personId, await detectConflicts(personId, date, startTime, endTime, excludeAssignmentId));
+    }
+    const conflictsWith = cache.get(personId);
+    if (conflictsWith.length > 0) results.push({ tier, personId, date, conflictsWith });
+  }
+  return results;
+}
 
 router.post('/', requireScheduleAccess, async (req, res) => {
   const input = createSchema.parse(req.body);
@@ -78,14 +120,35 @@ router.post('/', requireScheduleAccess, async (req, res) => {
     }
   }
 
-  const created = [];
-  const conflicts = [];
-  for (const date of dates) {
-    if (input.primaryPersonId) {
-      const found = await detectConflicts(input.primaryPersonId, date, input.startTime, input.endTime);
-      if (found.length > 0) conflicts.push({ date, personId: input.primaryPersonId, conflictsWith: found });
-    }
+  const tiers = {
+    primaryPersonId: input.primaryPersonId,
+    secondaryPersonId: input.secondaryPersonId || null,
+    tertiaryPersonId: input.tertiaryPersonId || null,
+    defaultPersonId: input.defaultPersonId,
+  };
 
+  // A resource CAN legitimately be scheduled across multiple calendars or
+  // overlapping shifts — this never blocks creation. It only requires the
+  // scheduler to explicitly see and approve the conflict first (a second
+  // submission with confirmConflicts: true) rather than silently allowing it.
+  const allConflicts = [];
+  for (const date of dates) {
+    allConflicts.push(...(await findAllConflicts(tiers, date, input.startTime, input.endTime)));
+  }
+  if (allConflicts.length > 0 && !input.confirmConflicts) {
+    return res.json({ requiresConfirmation: true, conflicts: allConflicts });
+  }
+
+  // Broadcast mode reuses the same primary/secondary/tertiary tiers as the
+  // pool of people offered the shift simultaneously (unless an explicit pool
+  // was passed) so both modes share one set of person fields.
+  const broadcastPool = input.mode === 'broadcast'
+    ? (input.broadcastPool?.length ? input.broadcastPool
+        : [tiers.primaryPersonId, tiers.secondaryPersonId, tiers.tertiaryPersonId].filter(Boolean))
+    : [];
+
+  const created = [];
+  for (const date of dates) {
     const { rows } = await pool.query(
       `INSERT INTO assignments
          (calendar_id, date, start_time, end_time, mode, primary_person_id, secondary_person_id,
@@ -93,8 +156,8 @@ router.post('/', requireScheduleAccess, async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
       [
         input.calendarId, date, input.startTime, input.endTime, input.mode,
-        input.primaryPersonId || null, input.secondaryPersonId || null, input.tertiaryPersonId || null,
-        input.defaultPersonId || null, input.broadcastPool || [], input.notes || null,
+        tiers.primaryPersonId, tiers.secondaryPersonId, tiers.tertiaryPersonId,
+        tiers.defaultPersonId, broadcastPool, input.notes || null,
         input.notifySlack ?? true, input.notifyEmail ?? true, req.user.id,
       ]
     );
@@ -102,7 +165,7 @@ router.post('/', requireScheduleAccess, async (req, res) => {
   }
 
   await req.logAudit({ action: 'create', entityType: 'assignment', entityId: created[0]?.id, newValues: { count: created.length } });
-  res.status(201).json({ assignments: created, conflicts });
+  res.status(201).json({ assignments: created, conflicts: allConflicts });
 });
 
 router.put('/:id', requireScheduleAccess, async (req, res) => {
@@ -125,15 +188,31 @@ router.put('/:id', requireScheduleAccess, async (req, res) => {
     const camel = field.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
     if (req.body[camel] !== undefined) {
       updates.push(`${field} = $${i++}`);
-      values.push(req.body[camel]);
+      values.push(PERSON_TIER_FIELDS.has(field) ? emptyToNull(req.body[camel]) : req.body[camel]);
     }
   }
   if (updates.length === 0) return res.json({ assignment: existing });
 
-  if (req.body.primaryPersonId) {
-    const conflicts = await detectConflicts(req.body.primaryPersonId, existing.date, existing.start_time, existing.end_time, existing.id);
-    if (conflicts.length > 0) {
-      return res.status(409).json({ error: 'Scheduling conflict detected', conflicts });
+  const mergedTiers = {
+    primaryPersonId: req.body.primaryPersonId !== undefined ? emptyToNull(req.body.primaryPersonId) : existing.primary_person_id,
+    secondaryPersonId: req.body.secondaryPersonId !== undefined ? emptyToNull(req.body.secondaryPersonId) : existing.secondary_person_id,
+    tertiaryPersonId: req.body.tertiaryPersonId !== undefined ? emptyToNull(req.body.tertiaryPersonId) : existing.tertiary_person_id,
+    defaultPersonId: req.body.defaultPersonId !== undefined ? emptyToNull(req.body.defaultPersonId) : existing.default_person_id,
+  };
+  if (!mergedTiers.primaryPersonId || !mergedTiers.defaultPersonId) {
+    return res.status(400).json({ error: 'Primary and Default person are required.' });
+  }
+
+  // Same symmetric policy as create: overlapping/multi-calendar bookings are
+  // allowed, never hard-blocked — they just require the scheduler to
+  // explicitly confirm once shown the conflict.
+  const tierFieldsChanged = ['primaryPersonId', 'secondaryPersonId', 'tertiaryPersonId', 'defaultPersonId']
+    .some((f) => req.body[f] !== undefined);
+  let conflicts = [];
+  if (tierFieldsChanged) {
+    conflicts = await findAllConflicts(mergedTiers, existing.date, existing.start_time, existing.end_time, existing.id);
+    if (conflicts.length > 0 && !req.body.confirmConflicts) {
+      return res.json({ requiresConfirmation: true, conflicts });
     }
   }
 
@@ -144,7 +223,7 @@ router.put('/:id', requireScheduleAccess, async (req, res) => {
   );
 
   await req.logAudit({ action: 'update', entityType: 'assignment', entityId: req.params.id, oldValues: existing, newValues: rows[0] });
-  res.json({ assignment: rows[0] });
+  res.json({ assignment: rows[0], conflicts });
 });
 
 router.delete('/:id', requireScheduleAccess, async (req, res) => {

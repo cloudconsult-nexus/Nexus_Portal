@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Plus, Wand2, Copy, Trash2, Pencil } from 'lucide-react';
-import { api, ApiError } from '../lib/api.js';
+import { ChevronLeft, ChevronRight, Plus, Wand2, Copy, Trash2, Pencil, ArrowDown, Radio, AlertTriangle } from 'lucide-react';
+import { api } from '../lib/api.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { canEditSchedule, isAdmin } from '../lib/roles.js';
 import {
-  PageHeader, Card, Button, Input, Field, Select, Textarea, Checkbox, Tabs,
+  PageHeader, Card, Button, Input, Field, Select, Textarea, Checkbox, Tabs, Badge,
   Modal, ConfirmDialog, LoadingBlock, EmptyState, ErrorBanner,
 } from '../components/ui.jsx';
 import EscalationChain from '../components/EscalationChain.jsx';
@@ -43,11 +43,11 @@ export default function Schedule() {
   const [assignments, setAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [warning, setWarning] = useState('');
 
   const [shiftModalOpen, setShiftModalOpen] = useState(false);
   const [editingShift, setEditingShift] = useState(null);
   const [form, setForm] = useState(EMPTY_SHIFT);
+  const [conflicts, setConflicts] = useState([]);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [autoOpen, setAutoOpen] = useState(false);
@@ -90,6 +90,11 @@ export default function Schedule() {
 
   useEffect(() => { loadAssignments(); }, [calendarId, rangeStart.getTime(), rangeEnd.getTime()]);
 
+  // Any field edit after a conflict was reported invalidates that report —
+  // require a fresh save (and fresh confirmation) rather than letting a
+  // stale "conflicts" list silently apply to changed tiers.
+  useEffect(() => { setConflicts([]); }, [form]);
+
   const peopleById = useMemo(() => Object.fromEntries(people.map((p) => [p.id, p])), [people]);
   const byDate = useMemo(() => {
     const map = {};
@@ -108,7 +113,7 @@ export default function Schedule() {
   function openCreate(date) {
     setEditingShift(null);
     setForm({ ...EMPTY_SHIFT, date: date || toISODate(anchor) });
-    setWarning('');
+    setConflicts([]);
     setShiftModalOpen(true);
   }
 
@@ -120,31 +125,32 @@ export default function Schedule() {
       tertiaryPersonId: a.tertiary_person_id || '', defaultPersonId: a.default_person_id || '',
       notes: a.notes || '', notifySlack: a.notify_slack, notifyEmail: a.notify_email, replicateMonths: 0,
     });
-    setWarning('');
+    setConflicts([]);
     setShiftModalOpen(true);
   }
 
-  async function handleSaveShift() {
+  // A person can legitimately end up on multiple calendars/overlapping
+  // shifts — this never blocks the save. The backend instead reports which
+  // tiers conflict and waits for an explicit resubmission with
+  // confirmConflicts: true before committing, which is the "scheduler
+  // approves the conflict" step.
+  async function handleSaveShift(confirmConflicts = false) {
     setSaving(true);
     setError('');
-    setWarning('');
     try {
-      if (editingShift) {
-        await api.put(`/assignments/${editingShift.id}`, form);
-      } else {
-        const data = await api.post('/assignments', { ...form, calendarId });
-        if (data.conflicts?.length) {
-          setWarning(`Created, but ${data.conflicts.length} shift(s) conflict with another calendar for the assigned person.`);
-        }
+      const payload = { ...form, confirmConflicts };
+      const data = editingShift
+        ? await api.put(`/assignments/${editingShift.id}`, payload)
+        : await api.post('/assignments', { ...payload, calendarId });
+      if (data.requiresConfirmation) {
+        setConflicts(data.conflicts || []);
+        return;
       }
+      setConflicts([]);
       setShiftModalOpen(false);
       await loadAssignments();
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        setError('Scheduling conflict: this person is already on call elsewhere during this window.');
-      } else {
-        setError(err.message);
-      }
+      setError(err.message);
     } finally {
       setSaving(false);
     }
@@ -208,7 +214,6 @@ export default function Schedule() {
 
       <div className="px-8 pb-8 space-y-3">
         {error && <ErrorBanner message={error} />}
-        {warning && <div className="rounded-lg border border-signal-amber/30 bg-signal-amber/5 px-3 py-2 text-sm text-amber-800">{warning}</div>}
 
         {!calendarId ? (
           <EmptyState title="No calendar selected" description="Create a calendar first from the Calendars page." />
@@ -226,7 +231,8 @@ export default function Schedule() {
       </div>
 
       <ShiftModal open={shiftModalOpen} onClose={() => setShiftModalOpen(false)} form={form} setForm={setForm}
-        people={people} editingShift={editingShift} onSave={handleSaveShift} saving={saving} />
+        people={people} peopleById={peopleById} editingShift={editingShift} conflicts={conflicts}
+        onSave={handleSaveShift} saving={saving} />
 
       <ConfirmDialog open={!!deleteTarget} title="Delete shift?" message="This removes the shift from the schedule."
         confirmLabel="Delete" onConfirm={handleDeleteShift} onCancel={() => setDeleteTarget(null)} loading={saving} />
@@ -336,40 +342,134 @@ function MonthGrid({ anchor, byDate, onSelectDay }) {
   );
 }
 
-function ShiftModal({ open, onClose, form, setForm, people, editingShift, onSave, saving }) {
+const MODE_OPTIONS = [
+  {
+    value: 'escalation', icon: ArrowDown, title: 'Escalation Chain',
+    description: "Primary → Secondary → Tertiary → Default. Each contacted in order if the previous doesn't respond.",
+  },
+  {
+    value: 'broadcast', icon: Radio, title: 'Broadcast / First-Accept',
+    description: 'Offer the shift to a pool of people simultaneously. First person to accept gets assigned.',
+  },
+];
+
+// The same four tiers back both modes — only the description of what each
+// tier means changes. Primary and Default are the only mandatory tiers
+// (enforced by the disabled Save button below and mirrored server-side);
+// they may be the same person.
+const TIER_DEFS = [
+  {
+    key: 'primaryPersonId', num: 1, label: 'Primary', tone: 'blue', required: true,
+    escalation: 'First person contacted when the shift triggers.',
+    broadcast: 'Offered the shift immediately, alongside Secondary/Tertiary if set.',
+  },
+  {
+    key: 'secondaryPersonId', num: 2, label: 'Secondary', tone: 'green', required: false,
+    escalation: 'Contacted if Primary does not respond within the configured timeout.',
+    broadcast: 'Offered the shift at the same time as Primary.',
+  },
+  {
+    key: 'tertiaryPersonId', num: 3, label: 'Tertiary', tone: 'purple', required: false,
+    escalation: 'Contacted if Primary and Secondary both do not respond.',
+    broadcast: 'Offered the shift at the same time as Primary.',
+  },
+  {
+    key: 'defaultPersonId', num: 4, label: 'Default', tone: 'amber', required: true,
+    escalation: 'Used when no one is assigned, or all of the above fail to respond.',
+    broadcast: 'Assigned automatically if no one accepts the broadcast.',
+  },
+];
+
+function ShiftModal({ open, onClose, form, setForm, people, peopleById, editingShift, conflicts, onSave, saving }) {
   const personOptions = (
     <>
       <option value="">— None —</option>
       {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
     </>
   );
+  const hasConflicts = conflicts?.length > 0;
+  const canSave = !!form.primaryPersonId && !!form.defaultPersonId;
+
   return (
-    <Modal open={open} onClose={onClose} title={editingShift ? 'Edit shift' : 'New shift'} size="lg"
-      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button onClick={onSave} loading={saving}>{editingShift ? 'Save' : 'Create'}</Button></>}>
+    <Modal open={open} onClose={onClose} title={editingShift ? 'Edit shift' : 'Create On-Call Assignment'} size="lg"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => onSave(hasConflicts)} loading={saving} disabled={!canSave} variant={hasConflicts ? 'danger' : undefined}>
+            {hasConflicts ? 'Save anyway' : (editingShift ? 'Save' : 'Create')}
+          </Button>
+        </>
+      }>
       <div className="space-y-4">
         <div className="grid grid-cols-3 gap-4">
-          <Field label="Date"><Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} disabled={!!editingShift} /></Field>
-          <Field label="Start"><Input type="time" value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} disabled={!!editingShift} /></Field>
-          <Field label="End"><Input type="time" value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} disabled={!!editingShift} /></Field>
+          <Field label="Start Date"><Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} disabled={!!editingShift} /></Field>
+          <Field label="Start Time"><Input type="time" value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} disabled={!!editingShift} /></Field>
+          <Field label="End Time"><Input type="time" value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} disabled={!!editingShift} /></Field>
         </div>
         {editingShift && <p className="text-xs text-muted -mt-2">Date/time are locked once created — delete and recreate to reschedule.</p>}
 
-        <Field label="Mode">
-          <Select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value })} disabled={!!editingShift}>
-            <option value="escalation">Escalation chain</option>
-            <option value="broadcast">Broadcast pool</option>
-          </Select>
-        </Field>
-
-        {form.mode === 'escalation' ? (
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Primary"><Select value={form.primaryPersonId} onChange={(e) => setForm({ ...form, primaryPersonId: e.target.value })}>{personOptions}</Select></Field>
-            <Field label="Secondary"><Select value={form.secondaryPersonId} onChange={(e) => setForm({ ...form, secondaryPersonId: e.target.value })}>{personOptions}</Select></Field>
-            <Field label="Tertiary"><Select value={form.tertiaryPersonId} onChange={(e) => setForm({ ...form, tertiaryPersonId: e.target.value })}>{personOptions}</Select></Field>
-            <Field label="Default"><Select value={form.defaultPersonId} onChange={(e) => setForm({ ...form, defaultPersonId: e.target.value })}>{personOptions}</Select></Field>
+        <div>
+          <span className="block text-xs font-medium text-ink mb-1">Assignment Mode</span>
+          <div className="grid grid-cols-2 gap-3">
+            {MODE_OPTIONS.map((m) => {
+              const selected = form.mode === m.value;
+              return (
+                <button key={m.value} type="button" disabled={!!editingShift}
+                  onClick={() => setForm({ ...form, mode: m.value })}
+                  className={`text-left rounded-lg border p-3 space-y-1 transition-colors ${
+                    selected ? 'border-signal-amber bg-signal-amber/5' : 'border-line hover:border-ink/20'
+                  } ${editingShift ? 'opacity-60 cursor-not-allowed' : ''}`}>
+                  <div className="flex items-center gap-2">
+                    <m.icon size={15} className={selected ? 'text-signal-amber' : 'text-muted'} />
+                    <span className="text-sm font-semibold text-ink">{m.title}</span>
+                  </div>
+                  <p className="text-xs text-muted">{m.description}</p>
+                </button>
+              );
+            })}
           </div>
-        ) : (
-          <p className="text-xs text-muted">Broadcast pool shifts can be configured after creation.</p>
+        </div>
+
+        <div>
+          <span className="block text-xs font-medium text-ink mb-2">
+            {form.mode === 'escalation' ? 'Escalation Chain' : 'Broadcast Pool'}
+          </span>
+          <div className="space-y-2.5">
+            {TIER_DEFS.map((t) => (
+              <div key={t.key} className="rounded-lg border border-line p-3">
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="h-5 w-5 rounded-full bg-surface border border-line flex items-center justify-center text-[11px] font-medium text-ink">{t.num}</span>
+                    <Badge tone={t.tone}>{t.label}{t.required ? ' *' : ''}</Badge>
+                  </div>
+                  <p className="text-xs text-muted text-right">{form.mode === 'escalation' ? t.escalation : t.broadcast}</p>
+                </div>
+                <Select value={form[t.key]} onChange={(e) => setForm({ ...form, [t.key]: e.target.value })}>
+                  {personOptions}
+                </Select>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-muted mt-1.5">* Primary and Default are required to schedule — they may be the same person.</p>
+        </div>
+
+        {hasConflicts && (
+          <div className="rounded-lg border border-signal-red/30 bg-signal-red/5 p-3 space-y-1.5">
+            <div className="flex items-center gap-1.5 text-signal-red">
+              <AlertTriangle size={14} />
+              <p className="text-xs font-semibold">Scheduling conflicts detected — review before saving</p>
+            </div>
+            <ul className="text-xs text-ink space-y-1 list-disc list-inside">
+              {conflicts.map((c, idx) => (
+                <li key={idx}>
+                  <span className="font-medium capitalize">{c.tier}</span>
+                  {' '}({peopleById[c.personId]?.name || 'Unknown'}) is already on call:{' '}
+                  {c.conflictsWith.map((cw) => `${cw.calendar_name} ${cw.start_time?.slice(0, 5)}–${cw.end_time?.slice(0, 5)}`).join(', ')}
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-muted">Saving anyway will knowingly double-book this person across calendars.</p>
+          </div>
         )}
 
         <Field label="Notes"><Textarea rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
