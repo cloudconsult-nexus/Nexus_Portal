@@ -224,8 +224,8 @@ export default function Customers() {
             {flattenTree(tree, collapsedIds).map(({ org, depth, hasChildren }) => (
               <Card
                 key={org.id}
-                className={`p-4 flex items-center gap-4 cursor-pointer hover:border-signal-amber/40 transition-colors ${org.is_deleted ? 'opacity-60' : ''}`}
-                style={{ marginLeft: depth * 28 }}
+                className={`p-4 flex items-center gap-4 cursor-pointer hover:border-signal-amber/40 transition-colors border-l-4 ${org.is_deleted ? 'opacity-60' : ''}`}
+                style={{ marginLeft: depth * 28, borderLeftColor: org.primary_color || undefined }}
                 onClick={() => openDetail(org)}
               >
                 {hasChildren ? (
@@ -238,11 +238,17 @@ export default function Customers() {
                 ) : (
                   <span className="w-4 shrink-0" />
                 )}
-                <div className="h-10 w-10 rounded-lg bg-surface border border-line flex items-center justify-center shrink-0 overflow-hidden">
+                <div
+                  className="h-10 w-10 rounded-lg bg-surface border border-line flex items-center justify-center shrink-0 overflow-hidden"
+                  style={{
+                    backgroundColor: org.logo_url ? undefined : (org.accent_color ? `${org.accent_color}26` : undefined),
+                    borderColor: org.accent_color || undefined,
+                  }}
+                >
                   {org.logo_url ? (
                     <img src={org.logo_url} alt="" className="h-full w-full object-contain" />
                   ) : (
-                    <Building2 size={18} className="text-ink" />
+                    <Building2 size={18} className="text-ink" style={{ color: org.accent_color || undefined }} />
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
