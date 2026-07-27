@@ -4,7 +4,7 @@ import { validateRowShape } from './importHelpers.js';
 // Assignment (schedule) imports, separate from importEngine.js because they
 // support update/delete alongside create (migrations/011), with old_values
 // snapshotted for the preview diff and for accurate rollback.
-export async function validateScheduleBatch(action, organizationId, rows, userId) {
+export async function validateScheduleBatch(action, organizationId, rows, userId, scopedIds = null) {
   const batch = await pool.query(
     `INSERT INTO import_batches (entity_type, organization_id, total_rows, created_by, action)
      VALUES ('assignment', $1, $2, $3, $4) RETURNING id`,
@@ -18,6 +18,18 @@ export async function validateScheduleBatch(action, organizationId, rows, userId
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const errors = validateRowShape('assignment', row);
+
+    // Previously the calendar named in a row was never checked against the
+    // importing user's scope (or even checked to exist, before commit
+    // time) — a Customer Admin could bulk-import/update/delete assignments
+    // for any calendar system-wide just by naming it in the CSV.
+    const { rows: calRows } = await pool.query('SELECT organization_id FROM calendars WHERE name = $1', [row.calendar_name]);
+    if (calRows.length === 0) {
+      errors.push(`No calendar named ${row.calendar_name}`);
+    } else if (!(scopedIds === null || scopedIds.includes(calRows[0].organization_id))) {
+      errors.push(`Calendar "${row.calendar_name}" is outside your permitted scope`);
+    }
+
     let oldValues = null;
     let existingAssignment = null;
 

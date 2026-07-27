@@ -4,9 +4,27 @@ import pool from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireScheduleAccess } from '../middleware/rbac.js';
 import { auditContext } from '../middleware/audit.js';
+import { resolveScopedOrgIds } from '../lib/orgScope.js';
 
 const router = Router();
 router.use(requireAuth, auditContext);
+
+// Assignments (and this auto-schedule generator) have no organization_id
+// of their own — scope via the calendar. See routes/assignments.js for the
+// identical helper.
+async function scopeCalendarOrRespond(req, res, calendarId) {
+  const { rows } = await pool.query('SELECT organization_id FROM calendars WHERE id = $1', [calendarId]);
+  if (!rows[0]) {
+    res.status(404).json({ error: 'Calendar not found' });
+    return null;
+  }
+  const scopedIds = await resolveScopedOrgIds(req);
+  if (!(scopedIds === null || scopedIds.includes(rows[0].organization_id))) {
+    res.status(403).json({ error: 'Insufficient permissions' });
+    return null;
+  }
+  return rows[0].organization_id;
+}
 
 const generateSchema = z.object({
   calendarId: z.string().uuid(),
@@ -41,11 +59,13 @@ function buildRotation(input) {
 
 router.post('/preview', requireScheduleAccess, async (req, res) => {
   const input = generateSchema.parse(req.body);
+  if (!(await scopeCalendarOrRespond(req, res, input.calendarId))) return;
   res.json({ preview: buildRotation(input) });
 });
 
 router.post('/commit', requireScheduleAccess, async (req, res) => {
   const input = generateSchema.parse(req.body);
+  if (!(await scopeCalendarOrRespond(req, res, input.calendarId))) return;
   const rotation = buildRotation(input);
 
   const created = [];

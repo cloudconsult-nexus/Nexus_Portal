@@ -9,16 +9,21 @@ import { parseCsv } from '../lib/importHelpers.js';
 import { getTemplateHeader } from '../lib/importTemplates.js';
 import { validateBatch, commitBatch, rollbackBatch } from '../lib/importEngine.js';
 import { validateScheduleBatch, commitScheduleBatch } from '../lib/scheduleImportService.js';
+import { resolveScopedOrgIds } from '../lib/orgScope.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 router.use(requireAuth, auditContext);
 
-// Organization/person/calendar imports are structural (Customer Admin+);
-// assignment imports are schedule mutations, so they follow the same
-// requireScheduleAccess rule as routes/assignments.js (Customer Admin+, or
-// a User individually granted schedule-edit authority).
+// Organization (Customer) imports create new Customer *records* — same
+// Global-Admin-only rule as POST /organizations (routes/organizations.js),
+// not just "admin tier." Person/calendar imports are structural
+// (Customer Admin+, scoped via resolveScopedOrgIds below); assignment
+// imports are schedule mutations, following the same requireScheduleAccess
+// rule as routes/assignments.js (Customer Admin+, or a User individually
+// granted schedule-edit authority).
 function canImportEntityType(user, entityType) {
+  if (entityType === 'organization') return user.role === 'global_admin';
   const isAdminTier = (ROLE_RANK[user.role] ?? -1) >= ROLE_RANK.customer_admin;
   if (entityType === 'assignment') return isAdminTier || user.canEditSchedule;
   return isAdminTier;
@@ -41,11 +46,12 @@ router.post('/validate', upload.single('file'), async (req, res) => {
   if (!canImportEntityType(req.user, entityType)) return res.status(403).json({ error: 'Insufficient permissions' });
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const rows = parseCsv(req.file.buffer);
+  const scopedIds = await resolveScopedOrgIds(req);
 
   const result =
     entityType === 'assignment'
-      ? await validateScheduleBatch(action, organizationId, rows, req.user.id)
-      : await validateBatch(entityType, organizationId, rows, req.user.id);
+      ? await validateScheduleBatch(action, organizationId, rows, req.user.id, scopedIds)
+      : await validateBatch(entityType, organizationId, rows, req.user.id, scopedIds);
 
   await pool.query(`UPDATE import_batches SET status = 'validated' WHERE id = $1 AND status = 'validated'`, [result.batchId]);
   res.json(result);

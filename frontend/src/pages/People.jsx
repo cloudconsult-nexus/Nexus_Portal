@@ -23,6 +23,7 @@ export default function People() {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
+  const [viewOrgId, setViewOrgId] = useState(null);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -33,7 +34,7 @@ export default function People() {
   async function load() {
     setLoading(true);
     try {
-      const data = await api.get('/people');
+      const data = await api.get(viewOrgId ? `/people?organizationId=${viewOrgId}` : '/people');
       setPeople(data.people);
     } catch (err) {
       setError(err.message);
@@ -42,7 +43,7 @@ export default function People() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [viewOrgId]);
 
   const filtered = people.filter((p) => {
     const matchesSearch = !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.email?.toLowerCase().includes(search.toLowerCase());
@@ -117,10 +118,15 @@ export default function People() {
             <option value="">All roles</option>
             {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
           </Select>
+          {canEdit && (
+            <div className="w-64">
+              <OrganizationSelector value={viewOrgId} onChange={setViewOrgId} allowClear clearLabel="All Customers" placeholder="All Customers" />
+            </div>
+          )}
         </div>
 
         {loading ? <LoadingBlock /> : filtered.length === 0 ? <EmptyState title="No people found" /> : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
             {filtered.map((p) => (
               <Card
                 key={p.id}

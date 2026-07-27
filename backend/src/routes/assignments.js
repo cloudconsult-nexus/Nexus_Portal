@@ -5,16 +5,37 @@ import { requireAuth } from '../middleware/auth.js';
 import { requireScheduleAccess } from '../middleware/rbac.js';
 import { auditContext } from '../middleware/audit.js';
 import { detectConflicts } from '../lib/calendarService.js';
+import { resolveScopedOrgIds } from '../lib/orgScope.js';
 
 const router = Router();
 router.use(requireAuth, auditContext);
 
 const MAX_REPLICATION_MONTHS = 36;
 
+// Assignments have no organization_id of their own — scope via the
+// calendar they belong to. Returns the calendar's organization_id (for
+// audit/other use) or null + sends the response itself if not found/
+// out of scope, so callers can `if (!orgId) return;`.
+async function scopeCalendarOrRespond(req, res, calendarId) {
+  const { rows } = await pool.query('SELECT organization_id FROM calendars WHERE id = $1', [calendarId]);
+  if (!rows[0]) {
+    res.status(404).json({ error: 'Calendar not found' });
+    return null;
+  }
+  const scopedIds = await resolveScopedOrgIds(req);
+  if (!(scopedIds === null || scopedIds.includes(rows[0].organization_id))) {
+    res.status(403).json({ error: 'Insufficient permissions' });
+    return null;
+  }
+  return rows[0].organization_id;
+}
+
 router.get('/', async (req, res) => {
   const { calendarId, startDate, endDate } = z
     .object({ calendarId: z.string().uuid(), startDate: z.string(), endDate: z.string() })
     .parse(req.query);
+
+  if (!(await scopeCalendarOrRespond(req, res, calendarId))) return;
 
   const { rows } = await pool.query(
     `SELECT * FROM assignments WHERE calendar_id = $1 AND date BETWEEN $2 AND $3 ORDER BY date, start_time`,
@@ -42,6 +63,7 @@ const createSchema = z.object({
 
 router.post('/', requireScheduleAccess, async (req, res) => {
   const input = createSchema.parse(req.body);
+  if (!(await scopeCalendarOrRespond(req, res, input.calendarId))) return;
 
   const dates = [input.date];
   if (input.replicateMonths) {
@@ -87,6 +109,7 @@ router.put('/:id', requireScheduleAccess, async (req, res) => {
   const { rows: existingRows } = await pool.query('SELECT * FROM assignments WHERE id = $1', [req.params.id]);
   const existing = existingRows[0];
   if (!existing) return res.status(404).json({ error: 'Not found' });
+  if (!(await scopeCalendarOrRespond(req, res, existing.calendar_id))) return;
 
   if (new Date(existing.date) < startOfToday()) {
     return res.status(400).json({ error: 'Past assignments are read-only' });
@@ -128,6 +151,7 @@ router.delete('/:id', requireScheduleAccess, async (req, res) => {
   const { rows: existingRows } = await pool.query('SELECT * FROM assignments WHERE id = $1', [req.params.id]);
   const existing = existingRows[0];
   if (!existing) return res.status(404).json({ error: 'Not found' });
+  if (!(await scopeCalendarOrRespond(req, res, existing.calendar_id))) return;
   if (new Date(existing.date) < startOfToday()) {
     return res.status(400).json({ error: 'Past assignments are read-only' });
   }
@@ -146,6 +170,7 @@ router.post('/copy', requireScheduleAccess, async (req, res) => {
       targetStartDate: z.string(),
     })
     .parse(req.body);
+  if (!(await scopeCalendarOrRespond(req, res, input.calendarId))) return;
 
   const { rows: sourceRows } = await pool.query(
     `SELECT * FROM assignments WHERE calendar_id = $1 AND date BETWEEN $2 AND $3 ORDER BY date`,

@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import { Plus, Trash2, RotateCcw, Building2, Search, Pencil, ChevronRight, ChevronDown } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../context/AuthContext.jsx';
-import { isGlobalAdmin } from '../lib/roles.js';
-import { sortByName, findOrg, buildTree, filterTree, getDescendantIds } from '../lib/orgHierarchy.js';
+import { isGlobalAdmin, isAdmin } from '../lib/roles.js';
+import { sortByName, findOrg, buildTree, filterTree, flattenTree, getDescendantIds } from '../lib/orgHierarchy.js';
 import {
   PageHeader, Card, Button, Input, Field, Select, Textarea, Checkbox, Modal, ConfirmDialog,
   LoadingBlock, EmptyState, ErrorBanner, Badge,
 } from '../components/ui.jsx';
 import LogoUpload from '../components/LogoUpload.jsx';
+import OrganizationSelector from '../components/OrganizationSelector.jsx';
 
 const DETAIL_FIELDS = ['name', 'account_number', 'phone', 'email', 'address', 'website', 'primary_contact', 'call_messages_url'];
 const BRANDING_FIELDS = ['name_override', 'tagline', 'primary_color', 'accent_color', 'description', 'message_html'];
@@ -48,12 +49,14 @@ function ReadOnlyImage({ label, url }) {
 export default function Customers() {
   const { user } = useAuth();
   const canManage = isGlobalAdmin(user);
+  const canFilterByLevel = isAdmin(user);
 
   const [orgs, setOrgs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
+  const [viewOrgId, setViewOrgId] = useState(null);
 
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -69,7 +72,7 @@ export default function Customers() {
   async function loadList() {
     setLoading(true);
     try {
-      const data = await api.get('/organizations');
+      const data = await api.get(viewOrgId ? `/organizations?organizationId=${viewOrgId}` : '/organizations');
       setOrgs(data.organizations);
     } catch (err) {
       setError(err.message);
@@ -78,7 +81,7 @@ export default function Customers() {
     }
   }
 
-  useEffect(() => { loadList(); }, []);
+  useEffect(() => { loadList(); }, [viewOrgId]);
 
   const tree = filterTree(buildTree(orgs), search);
   const parentIds = new Set(orgs.filter((o) => o.parent_id).map((o) => o.parent_id));
@@ -89,21 +92,6 @@ export default function Customers() {
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
-  }
-
-  // Flattens the visible (non-collapsed) part of the tree into a single
-  // list, so the row cards can render in one space-y-3 container at
-  // whatever depth, rather than nesting nested containers per level.
-  function flattenVisible(nodes, depth = 0) {
-    const rows = [];
-    for (const node of nodes) {
-      const hasChildren = node.children.length > 0;
-      rows.push({ org: node, depth, hasChildren });
-      if (hasChildren && !collapsedIds.has(node.id)) {
-        rows.push(...flattenVisible(node.children, depth + 1));
-      }
-    }
-    return rows;
   }
 
   // The list row already has every field (GET /organizations is SELECT *),
@@ -211,6 +199,11 @@ export default function Customers() {
             <Search size={14} className="absolute left-2.5 top-2.5 text-muted" />
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search customers…" className="pl-8" />
           </div>
+          {canFilterByLevel && (
+            <div className="w-64">
+              <OrganizationSelector value={viewOrgId} onChange={setViewOrgId} allowClear clearLabel="All Customers" placeholder="All Customers" />
+            </div>
+          )}
           {parentIds.size > 0 && (
             <Button
               size="sm"
@@ -228,7 +221,7 @@ export default function Customers() {
           <EmptyState title="No customers match your search" />
         ) : (
           <div className="space-y-3">
-            {flattenVisible(tree).map(({ org, depth, hasChildren }) => (
+            {flattenTree(tree, collapsedIds).map(({ org, depth, hasChildren }) => (
               <Card
                 key={org.id}
                 className={`p-4 flex items-center gap-4 cursor-pointer hover:border-signal-amber/40 transition-colors ${org.is_deleted ? 'opacity-60' : ''}`}

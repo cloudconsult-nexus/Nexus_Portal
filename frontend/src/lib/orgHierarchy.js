@@ -62,6 +62,24 @@ export function getDescendantIds(orgs, id) {
   return result;
 }
 
+// Flattens a tree (from buildTree) into a single ordered list of
+// { org, depth, hasChildren } — depth-first, so a parent is always
+// immediately followed by its own children. `collapsedIds` (a Set of org
+// ids) hides a node's children without removing the node itself; leave it
+// empty/omitted for a fully-expanded flat list (e.g. a picker dropdown that
+// has no concept of collapsing).
+export function flattenTree(nodes, collapsedIds = new Set(), depth = 0) {
+  const rows = [];
+  for (const node of nodes) {
+    const hasChildren = node.children.length > 0;
+    rows.push({ org: node, depth, hasChildren });
+    if (hasChildren && !collapsedIds.has(node.id)) {
+      rows.push(...flattenTree(node.children, collapsedIds, depth + 1));
+    }
+  }
+  return rows;
+}
+
 // Recursive search over a tree (from buildTree) — keeps a node if its own
 // name matches, or any descendant's does, so a matched grandchild doesn't
 // get orphaned out of its ancestor chain mid-search.

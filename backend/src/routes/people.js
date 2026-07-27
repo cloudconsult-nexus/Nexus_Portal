@@ -7,6 +7,7 @@ import { requireRole } from '../middleware/rbac.js';
 import { auditContext } from '../middleware/audit.js';
 import { assetKey, uploadAsset, resolveAssetUrl } from '../lib/storage.js';
 import { createInvitation } from '../lib/invitations.js';
+import { resolveScopedOrgIds } from '../lib/orgScope.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -20,15 +21,15 @@ async function withResolvedPhoto(person) {
 }
 
 router.get('/', async (req, res) => {
-  const scopeOrgId = req.user.role === 'global_admin' ? null : req.user.organizationId;
+  const scopedIds = await resolveScopedOrgIds(req);
   const { rows } = await pool.query(
     `SELECT id, organization_id, name, email, primary_phone, sms_phone, secondary_phone,
             department, job_title, role, can_edit_schedule, is_active, photo_url, login_enabled,
             last_active_at
      FROM people
-     WHERE is_deleted = false AND ($1::uuid IS NULL OR organization_id = $1)
+     WHERE is_deleted = false AND ($1::uuid[] IS NULL OR organization_id = ANY($1))
      ORDER BY name`,
-    [scopeOrgId]
+    [scopedIds]
   );
   res.json({ people: await Promise.all(rows.map(withResolvedPhoto)) });
 });
@@ -37,7 +38,8 @@ router.get('/:id', async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM people WHERE id = $1 AND is_deleted = false', [req.params.id]);
   const person = rows[0];
   if (!person) return res.status(404).json({ error: 'Not found' });
-  if (!scopeAllows(req, person.organization_id)) return res.status(403).json({ error: 'Insufficient permissions' });
+  const scopedIds = await resolveScopedOrgIds(req);
+  if (!scopeAllows(scopedIds, person.organization_id)) return res.status(403).json({ error: 'Insufficient permissions' });
   const { password_hash, mfa_secret, ...safe } = person;
   res.json({ person: await withResolvedPhoto(safe) });
 });
@@ -58,7 +60,8 @@ const createSchema = z.object({
 
 router.post('/', requireRole('customer_admin'), async (req, res) => {
   const input = createSchema.parse(req.body);
-  if (!scopeAllows(req, input.organizationId)) return res.status(403).json({ error: 'Insufficient permissions' });
+  const scopedIds = await resolveScopedOrgIds(req);
+  if (!scopeAllows(scopedIds, input.organizationId)) return res.status(403).json({ error: 'Insufficient permissions' });
 
   const { rows } = await pool.query(
     `INSERT INTO people (organization_id, name, email, primary_phone, sms_phone, secondary_phone, department, job_title, role, can_edit_schedule)
@@ -88,7 +91,8 @@ router.put('/:id', requireRole('customer_admin'), async (req, res) => {
   const { rows: existingRows } = await pool.query('SELECT * FROM people WHERE id = $1 AND is_deleted = false', [req.params.id]);
   const existing = existingRows[0];
   if (!existing) return res.status(404).json({ error: 'Not found' });
-  if (!scopeAllows(req, existing.organization_id)) return res.status(403).json({ error: 'Insufficient permissions' });
+  const scopedIds = await resolveScopedOrgIds(req);
+  if (!scopeAllows(scopedIds, existing.organization_id)) return res.status(403).json({ error: 'Insufficient permissions' });
 
   const fields = ['name', 'email', 'primary_phone', 'sms_phone', 'secondary_phone', 'department', 'job_title', 'is_active', 'can_edit_schedule'];
   const updates = [];
@@ -138,6 +142,12 @@ router.post('/:id/photo', upload.single('photo'), async (req, res) => {
   const isSelf = req.user.id === req.params.id;
   const isAdminTier = req.user.role === 'global_admin' || req.user.role === 'customer_admin';
   if (!isSelf && !isAdminTier) return res.status(403).json({ error: 'Insufficient permissions' });
+  if (!isSelf) {
+    const { rows } = await pool.query('SELECT organization_id FROM people WHERE id = $1', [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+    const scopedIds = await resolveScopedOrgIds(req);
+    if (!scopeAllows(scopedIds, rows[0].organization_id)) return res.status(403).json({ error: 'Insufficient permissions' });
+  }
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const key = assetKey('person-photos', req.file.originalname);
   const url = await uploadAsset(key, req.file.buffer, req.file.mimetype);
@@ -146,6 +156,11 @@ router.post('/:id/photo', upload.single('photo'), async (req, res) => {
 });
 
 router.delete('/:id', requireRole('customer_admin'), async (req, res) => {
+  const { rows: existingRows } = await pool.query('SELECT organization_id FROM people WHERE id = $1 AND is_deleted = false', [req.params.id]);
+  if (!existingRows[0]) return res.status(404).json({ error: 'Not found' });
+  const scopedIds = await resolveScopedOrgIds(req);
+  if (!scopeAllows(scopedIds, existingRows[0].organization_id)) return res.status(403).json({ error: 'Insufficient permissions' });
+
   const { rows } = await pool.query(
     `UPDATE people SET is_deleted = true, deleted_at = now(), deleted_by = $1
      WHERE id = $2 AND is_deleted = false RETURNING *`,
@@ -157,9 +172,8 @@ router.delete('/:id', requireRole('customer_admin'), async (req, res) => {
   res.status(204).end();
 });
 
-function scopeAllows(req, organizationId) {
-  if (req.user.role === 'global_admin') return true;
-  return req.user.organizationId === organizationId;
+function scopeAllows(scopedIds, organizationId) {
+  return scopedIds === null || scopedIds.includes(organizationId);
 }
 
 export default router;

@@ -7,6 +7,7 @@ import { requireRole } from '../middleware/rbac.js';
 import { auditContext } from '../middleware/audit.js';
 import { getEffectiveBranding } from '../lib/branding.js';
 import { assetKey, uploadAsset, resolveAssetUrl } from '../lib/storage.js';
+import { resolveScopedOrgIds } from '../lib/orgScope.js';
 
 // Customers (flat — no more hierarchy levels/parent nesting; see
 // migrations/013_tas_customer_model.sql). Kept on the `organizations`
@@ -27,13 +28,15 @@ async function withResolvedBranding(org) {
   };
 }
 
-// Global Admin sees every Customer; a Customer Admin/User sees only their
-// own single Customer — a direct equality check now, not a subtree query.
+// Global Admin sees every Customer (or, with ?organizationId=, that
+// Customer + its descendants as a "view as" filter on their already-full
+// access); a Customer Admin/User sees their own Customer + every
+// descendant in the optional parent_id nesting — see lib/orgScope.js.
 router.get('/', async (req, res) => {
-  const scopeOrgId = req.user.role === 'global_admin' ? null : req.user.organizationId;
+  const scopedIds = await resolveScopedOrgIds(req);
   const { rows } = await pool.query(
-    `SELECT * FROM organizations WHERE is_deleted = false AND ($1::uuid IS NULL OR id = $1) ORDER BY name`,
-    [scopeOrgId]
+    `SELECT * FROM organizations WHERE is_deleted = false AND ($1::uuid[] IS NULL OR id = ANY($1)) ORDER BY name`,
+    [scopedIds]
   );
   res.json({ organizations: await Promise.all(rows.map(withResolvedBranding)) });
 });
@@ -42,7 +45,8 @@ router.get('/:id', async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM organizations WHERE id = $1', [req.params.id]);
   const org = rows[0];
   if (!org) return res.status(404).json({ error: 'Not found' });
-  if (!scopeAllows(req, org.id)) return res.status(403).json({ error: 'Insufficient permissions' });
+  const scopedIds = await resolveScopedOrgIds(req);
+  if (!scopeAllows(scopedIds, org.id)) return res.status(403).json({ error: 'Insufficient permissions' });
   res.json({ organization: await withResolvedBranding(org) });
 });
 
@@ -172,9 +176,8 @@ router.post('/:id/restore', requireRole('global_admin'), async (req, res) => {
   res.status(204).end();
 });
 
-function scopeAllows(req, orgId) {
-  if (req.user.role === 'global_admin') return true;
-  return req.user.organizationId === orgId;
+function scopeAllows(scopedIds, orgId) {
+  return scopedIds === null || scopedIds.includes(orgId);
 }
 
 export default router;

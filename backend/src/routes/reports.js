@@ -5,6 +5,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { auditContext } from '../middleware/audit.js';
 import { getDashboardAlerts } from '../lib/calendarService.js';
 import { buildEmbedUrl } from '../lib/embedSso.js';
+import { resolveScopedOrgIds, getDescendantIds } from '../lib/orgScope.js';
 
 const router = Router();
 router.use(requireAuth, auditContext);
@@ -12,17 +13,30 @@ router.use(requireAuth, auditContext);
 router.get('/dashboard-summary', async (req, res) => {
   const { organizationId } = z.object({ organizationId: z.string().uuid() }).parse(req.query);
 
+  // Previously trusted organizationId with no ownership check at all — a
+  // Customer Admin could view any Customer's dashboard stats by changing
+  // this query param. Now validated against the caller's resolved scope,
+  // and the stats themselves cover organizationId + its descendants
+  // ("this level and down"), not just the one org.
+  const scopedIds = await resolveScopedOrgIds(req);
+  if (!(scopedIds === null || scopedIds.includes(organizationId))) {
+    return res.status(403).json({ error: 'Insufficient permissions' });
+  }
+  const subtreeIds = [organizationId, ...(await getDescendantIds(organizationId))];
+
   const [orgCount, peopleCount, calendarCount, upcomingCount] = await Promise.all([
-    pool.query(`SELECT count(*) FROM organizations WHERE is_deleted = false`),
-    pool.query(`SELECT count(*) FROM people WHERE organization_id = $1 AND is_deleted = false`, [organizationId]),
-    pool.query(`SELECT count(*) FROM calendars WHERE organization_id = $1`, [organizationId]),
+    pool.query(`SELECT count(*) FROM organizations WHERE is_deleted = false AND id = ANY($1)`, [subtreeIds]),
+    pool.query(`SELECT count(*) FROM people WHERE organization_id = ANY($1) AND is_deleted = false`, [subtreeIds]),
+    pool.query(`SELECT count(*) FROM calendars WHERE organization_id = ANY($1)`, [subtreeIds]),
     pool.query(
       `SELECT count(*) FROM assignments a JOIN calendars c ON c.id = a.calendar_id
-       WHERE c.organization_id = $1 AND a.date >= CURRENT_DATE AND a.date < CURRENT_DATE + 7`,
-      [organizationId]
+       WHERE c.organization_id = ANY($1) AND a.date >= CURRENT_DATE AND a.date < CURRENT_DATE + 7`,
+      [subtreeIds]
     ),
   ]);
 
+  // getDashboardAlerts is still single-org (not subtree-aware) — a smaller,
+  // separate change if alerts need to roll up across descendants too.
   const alerts = await getDashboardAlerts(organizationId);
 
   res.json({
@@ -38,6 +52,13 @@ router.get('/coverage', async (req, res) => {
   const { calendarId, startDate, endDate } = z
     .object({ calendarId: z.string().uuid(), startDate: z.string(), endDate: z.string() })
     .parse(req.query);
+
+  const { rows: calRows } = await pool.query('SELECT organization_id FROM calendars WHERE id = $1', [calendarId]);
+  if (!calRows[0]) return res.status(404).json({ error: 'Calendar not found' });
+  const scopedIds = await resolveScopedOrgIds(req);
+  if (!(scopedIds === null || scopedIds.includes(calRows[0].organization_id))) {
+    return res.status(403).json({ error: 'Insufficient permissions' });
+  }
 
   const { rows } = await pool.query(
     `SELECT date, count(*) FILTER (WHERE primary_person_id IS NOT NULL) AS covered, count(*) AS total
@@ -59,13 +80,19 @@ router.get('/workload', async (req, res) => {
     .object({ organizationId: z.string().uuid(), startDate: z.string(), endDate: z.string() })
     .parse(req.query);
 
+  const scopedIds = await resolveScopedOrgIds(req);
+  if (!(scopedIds === null || scopedIds.includes(organizationId))) {
+    return res.status(403).json({ error: 'Insufficient permissions' });
+  }
+  const subtreeIds = [organizationId, ...(await getDescendantIds(organizationId))];
+
   const { rows } = await pool.query(
     `SELECT p.id, p.name, count(a.id) AS shift_count
      FROM people p
      LEFT JOIN assignments a ON a.primary_person_id = p.id AND a.date BETWEEN $2 AND $3
-     WHERE p.organization_id = $1 AND p.is_deleted = false
+     WHERE p.organization_id = ANY($1) AND p.is_deleted = false
      GROUP BY p.id, p.name ORDER BY shift_count DESC`,
-    [organizationId, startDate, endDate]
+    [subtreeIds, startDate, endDate]
   );
   res.json({ workload: rows });
 });

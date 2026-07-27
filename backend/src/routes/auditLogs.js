@@ -3,6 +3,7 @@ import { z } from 'zod';
 import pool from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireRole } from '../middleware/rbac.js';
+import { resolveScopedOrgIds } from '../lib/orgScope.js';
 
 const router = Router();
 router.use(requireAuth, requireRole('customer_admin'));
@@ -24,7 +25,14 @@ router.get('/', async (req, res) => {
 
   if (q.entityType) { conditions.push(`entity_type = $${i++}`); values.push(q.entityType); }
   if (q.action) { conditions.push(`action = $${i++}`); values.push(q.action); }
-  if (q.organizationId) { conditions.push(`organization_id = $${i++}`); values.push(q.organizationId); }
+  // Never trust q.organizationId directly — resolveScopedOrgIds reads the
+  // same query param internally, but only honors it within the caller's
+  // own subtree (Customer Admin) or as an optional "view as" filter
+  // (Global Admin). Previously this was an unchecked client-supplied
+  // filter, so a Customer Admin who simply omitted it saw every
+  // Customer's audit trail.
+  const scopedIds = await resolveScopedOrgIds(req);
+  if (scopedIds !== null) { conditions.push(`organization_id = ANY($${i++})`); values.push(scopedIds); }
   if (q.from) { conditions.push(`created_at >= $${i++}`); values.push(q.from); }
   if (q.to) { conditions.push(`created_at <= $${i++}`); values.push(q.to); }
 

@@ -3,12 +3,13 @@ import { useSearchParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Plus, Wand2, Copy, Trash2, Pencil } from 'lucide-react';
 import { api, ApiError } from '../lib/api.js';
 import { useAuth } from '../context/AuthContext.jsx';
-import { canEditSchedule } from '../lib/roles.js';
+import { canEditSchedule, isAdmin } from '../lib/roles.js';
 import {
   PageHeader, Card, Button, Input, Field, Select, Textarea, Checkbox, Tabs,
   Modal, ConfirmDialog, LoadingBlock, EmptyState, ErrorBanner,
 } from '../components/ui.jsx';
 import EscalationChain from '../components/EscalationChain.jsx';
+import OrganizationSelector from '../components/OrganizationSelector.jsx';
 
 const VIEWS = [{ value: 'day', label: 'Day' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
@@ -30,10 +31,12 @@ const EMPTY_SHIFT = {
 export default function Schedule() {
   const { user } = useAuth();
   const canEdit = canEditSchedule(user);
+  const canFilterByLevel = isAdmin(user);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [calendars, setCalendars] = useState([]);
   const [calendarId, setCalendarId] = useState(searchParams.get('calendarId') || '');
+  const [viewOrgId, setViewOrgId] = useState(null);
   const [people, setPeople] = useState([]);
   const [view, setView] = useState('week');
   const [anchor, setAnchor] = useState(new Date());
@@ -50,12 +53,16 @@ export default function Schedule() {
   const [autoOpen, setAutoOpen] = useState(false);
 
   useEffect(() => {
-    api.get('/calendars').then((data) => {
+    api.get(viewOrgId ? `/calendars?organizationId=${viewOrgId}` : '/calendars').then((data) => {
       setCalendars(data.calendars);
-      if (!calendarId && data.calendars[0]) setCalendarId(data.calendars[0].id);
+      if (data.calendars.length > 0 && !data.calendars.some((c) => c.id === calendarId)) {
+        setCalendarId(data.calendars[0].id);
+      } else if (data.calendars.length === 0) {
+        setCalendarId('');
+      }
     });
     api.get('/people').then((data) => setPeople(data.people));
-  }, []);
+  }, [viewOrgId]);
 
   useEffect(() => {
     if (calendarId) setSearchParams({ calendarId }, { replace: true });
@@ -162,6 +169,11 @@ export default function Schedule() {
         description="Click a shift to edit it. Past shifts are read-only."
         actions={
           <div className="flex items-center gap-2">
+            {canFilterByLevel && (
+              <div className="w-56">
+                <OrganizationSelector value={viewOrgId} onChange={setViewOrgId} allowClear clearLabel="All Customers" placeholder="All Customers" />
+              </div>
+            )}
             <Select value={calendarId} onChange={(e) => setCalendarId(e.target.value)} className="w-48">
               {calendars.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>

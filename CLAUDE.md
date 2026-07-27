@@ -31,19 +31,30 @@ Flat **TAS instance → Customer** model (Phase 5.1, 2026-07-26): one deployed
 Portal is one TAS (singleton `tas_settings` row), and every `organizations` row
 is a standalone Customer with equal standing — no fixed hierarchy levels, no
 Master Org/Main Account/Sub Account/Provider/Department node types (all
-dropped, `migrations/013_tas_customer_model.sql`). Contacts/schedules are
-siloed per Customer.
+dropped, `migrations/013_tas_customer_model.sql`). Contacts/schedules were
+originally siloed per Customer with no exceptions — see the subtree-scoping
+note just below for the deliberate exception added afterward.
 
 **Optional Customer nesting reintroduced (2026-07-26, `migrations/
-014_organization_hierarchy.sql`), at the client's explicit request, for the
-Customers page's tile display** (indent + expand/collapse) — `organizations.
-parent_id`, nullable, any Customer can optionally nest under any other
-(no fixed levels/types, unlike the old hierarchy). This is **display/data
-only** — RBAC scope is unchanged: a Customer Admin/User still only ever sees
-their own single Customer row via `GET /organizations`, never their
-parent's/children's data. Don't read this column's existence as a reversion
-to the old rigid hierarchy model or extend RBAC to subtrees without asking —
-neither was requested.
+014_organization_hierarchy.sql`), at the client's explicit request** —
+`organizations.parent_id`, nullable, any Customer can optionally nest under
+any other (no fixed levels/types, unlike the old hierarchy). Originally
+display-only on the Customers page (indent + expand/collapse).
+
+**RBAC scope subsequently expanded to match the nesting (2026-07-26,
+`backend/src/lib/orgScope.js`)** — also the client's explicit request, and
+also a deliberate exception to the spec's siloing language below: a Customer
+Admin/User's data access is **their own Customer + every descendant** in the
+`parent_id` tree (organizations, people, calendars, schedules/assignments),
+not just their own single row. `resolveScopedOrgIds()` is the one shared
+helper computing this everywhere — always use it for any new
+organization-scoped route rather than a fresh `req.user.organizationId`
+equality check. Global Admin also gets an optional "view as" filter (same
+helper, `?organizationId=` query/body param) on top of their already-full
+access — not a privilege change for Global Admin, just a UI convenience.
+Don't read either of these as a reversion to the old rigid hierarchy model
+(no fixed levels/types were reintroduced) — just don't further widen RBAC
+scope (e.g. cross-tenant) without asking.
 
 Users and People are consolidated into a single **Person + RBAC** model.
 Roles: Global Admin, Customer Admin, User (3 tiers, down from the old 5 —

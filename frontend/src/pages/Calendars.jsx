@@ -22,11 +22,12 @@ export default function Calendars() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [viewOrgId, setViewOrgId] = useState(null);
 
   async function load() {
     setLoading(true);
     try {
-      const data = await api.get('/calendars');
+      const data = await api.get(viewOrgId ? `/calendars?organizationId=${viewOrgId}` : '/calendars');
       setCalendars(data.calendars);
     } catch (err) {
       setError(err.message);
@@ -35,7 +36,7 @@ export default function Calendars() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [viewOrgId]);
 
   function openCreate() {
     setEditing(null);
@@ -85,6 +86,11 @@ export default function Calendars() {
       <PageHeader title="Calendars" description="On-call calendars, one per coverage area." actions={canEdit && <Button onClick={openCreate}><Plus size={14} /> New calendar</Button>} />
       <div className="p-8 space-y-4">
         {error && <ErrorBanner message={error} />}
+        {canEdit && (
+          <div className="w-64">
+            <OrganizationSelector value={viewOrgId} onChange={setViewOrgId} allowClear clearLabel="All Customers" placeholder="All Customers" />
+          </div>
+        )}
         {loading ? <LoadingBlock /> : calendars.length === 0 ? (
           <EmptyState icon={CalendarClock} title="No calendars yet" description="Create a calendar to start scheduling on-call coverage." />
         ) : (

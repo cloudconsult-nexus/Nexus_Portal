@@ -4,7 +4,7 @@ import { validateRowShape } from './importHelpers.js';
 // Bulk import for organization/person/calendar. Assignment imports go
 // through scheduleImportService.js instead — they need update/delete
 // actions (migrations/011_schedule_import_actions.sql), not just create.
-export async function validateBatch(entityType, organizationId, rows, userId) {
+export async function validateBatch(entityType, organizationId, rows, userId, scopedIds = null) {
   const batch = await pool.query(
     `INSERT INTO import_batches (entity_type, organization_id, total_rows, created_by)
      VALUES ($1, $2, $3, $4) RETURNING id`,
@@ -17,7 +17,7 @@ export async function validateBatch(entityType, organizationId, rows, userId) {
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
-    const errors = await validateRow(entityType, row);
+    const errors = await validateRow(entityType, row, scopedIds);
     const status = errors.length > 0 ? 'invalid' : 'valid';
     if (status === 'valid') validCount++;
     else invalidCount++;
@@ -38,7 +38,13 @@ export async function validateBatch(entityType, organizationId, rows, userId) {
   return { batchId, totalRows: rows.length, validRows: validCount, invalidRows: invalidCount };
 }
 
-async function validateRow(entityType, row) {
+// scopedIds (from routes/imports.js's resolveScopedOrgIds call) is the
+// caller's permitted organization ids — null for an unfiltered Global
+// Admin. Previously a row's organization_account_number was only checked
+// for existence, never for whether it belonged to the importing user, so
+// a Customer Admin could bulk-import people/calendars into any Customer
+// system-wide just by putting a different account number in the CSV.
+async function validateRow(entityType, row, scopedIds) {
   const errors = validateRowShape(entityType, row);
   if (errors.length > 0) return errors;
 
@@ -46,7 +52,11 @@ async function validateRow(entityType, row) {
     const { rows } = await pool.query('SELECT id FROM organizations WHERE account_number = $1', [
       row.organization_account_number,
     ]);
-    if (rows.length === 0) errors.push(`No organization found with account number ${row.organization_account_number}`);
+    if (rows.length === 0) {
+      errors.push(`No organization found with account number ${row.organization_account_number}`);
+    } else if (!(scopedIds === null || scopedIds.includes(rows[0].id))) {
+      errors.push(`Organization with account number ${row.organization_account_number} is outside your permitted scope`);
+    }
   }
 
   return errors;
