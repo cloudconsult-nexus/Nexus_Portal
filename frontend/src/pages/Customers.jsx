@@ -238,8 +238,12 @@ export default function Customers() {
                 ) : (
                   <span className="w-4 shrink-0" />
                 )}
-                <div className="h-10 w-10 rounded-lg bg-surface border border-line flex items-center justify-center shrink-0">
-                  <Building2 size={18} className="text-ink" />
+                <div className="h-10 w-10 rounded-lg bg-surface border border-line flex items-center justify-center shrink-0 overflow-hidden">
+                  {org.logo_url ? (
+                    <img src={org.logo_url} alt="" className="h-full w-full object-contain" />
+                  ) : (
+                    <Building2 size={18} className="text-ink" />
+                  )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
