@@ -101,7 +101,7 @@ export default function Dashboard() {
                 renderItem={(a) => (
                   <li key={a.id} className="text-xs">
                     <Link to="/schedule" className="text-ink hover:underline">{a.calendar_name}</Link>
-                    <span className="text-muted"> — {a.date}</span>
+                    <span className="text-muted"> — {a.date?.slice(0, 10)}</span>
                   </li>
                 )}
               />
@@ -114,7 +114,7 @@ export default function Dashboard() {
                 renderItem={(a) => (
                   <li key={a.id} className="text-xs">
                     <Link to="/schedule" className="text-ink hover:underline">{a.calendar_name}</Link>
-                    <span className="text-muted"> — {a.date}</span>
+                    <span className="text-muted"> — {a.date?.slice(0, 10)}</span>
                   </li>
                 )}
               />
@@ -126,7 +126,7 @@ export default function Dashboard() {
                 emptyLabel="No one is double-booked."
                 renderItem={(a) => (
                   <li key={a.assignment_id} className="text-xs text-ink">
-                    {a.date} <span className="text-muted">— overlapping shifts</span>
+                    {a.date?.slice(0, 10)} <span className="text-muted">— overlapping shifts</span>
                   </li>
                 )}
               />

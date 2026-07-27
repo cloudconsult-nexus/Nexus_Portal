@@ -13,7 +13,7 @@ const TIERS = [
 // happening right now) render with no pulse at all.
 function getLiveTierIndex(assignment, tiers) {
   const now = new Date();
-  const [y, m, d] = assignment.date.split('-').map(Number);
+  const [y, m, d] = assignment.date.slice(0, 10).split('-').map(Number);
   const start = new Date(y, m - 1, d, ...assignment.start_time.split(':').map(Number));
   const end = new Date(y, m - 1, d, ...assignment.end_time.split(':').map(Number));
   if (now < start || now > end) return -1;

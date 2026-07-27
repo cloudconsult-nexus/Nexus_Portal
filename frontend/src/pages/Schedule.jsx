@@ -93,7 +93,14 @@ export default function Schedule() {
   const peopleById = useMemo(() => Object.fromEntries(people.map((p) => [p.id, p])), [people]);
   const byDate = useMemo(() => {
     const map = {};
-    for (const a of assignments) (map[a.date] ||= []).push(a);
+    // a.date comes back as a full ISO timestamp (Postgres DATE -> pg -> JS
+    // Date -> JSON.stringify, e.g. "2026-07-27T00:00:00.000Z"), but every
+    // view keys its lookup with a bare YYYY-MM-DD from toISODate() — without
+    // normalizing here first, the two never match and shifts silently never
+    // render in Day/Week/Month, even though they exist (confirmed via the
+    // API directly, and via Dashboard's count, which never touches this
+    // string at all).
+    for (const a of assignments) (map[a.date.slice(0, 10)] ||= []).push(a);
     for (const key in map) map[key].sort((a, b) => timeToMinutes(a.start_time) - timeToMinutes(b.start_time));
     return map;
   }, [assignments]);
@@ -108,7 +115,7 @@ export default function Schedule() {
   function openEdit(a) {
     setEditingShift(a);
     setForm({
-      date: a.date, startTime: a.start_time?.slice(0, 5), endTime: a.end_time?.slice(0, 5), mode: a.mode,
+      date: a.date?.slice(0, 10), startTime: a.start_time?.slice(0, 5), endTime: a.end_time?.slice(0, 5), mode: a.mode,
       primaryPersonId: a.primary_person_id || '', secondaryPersonId: a.secondary_person_id || '',
       tertiaryPersonId: a.tertiary_person_id || '', defaultPersonId: a.default_person_id || '',
       notes: a.notes || '', notifySlack: a.notify_slack, notifyEmail: a.notify_email, replicateMonths: 0,

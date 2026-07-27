@@ -146,7 +146,7 @@ function RequestSwapModal({ open, onClose, people, onCreated }) {
         <Field label="Shift">
           <Select value={assignmentId} onChange={(e) => setAssignmentId(e.target.value)} disabled={!calendarId}>
             <option value="">Select…</option>
-            {assignments.map((a) => <option key={a.id} value={a.id}>{a.date} {a.start_time?.slice(0, 5)}–{a.end_time?.slice(0, 5)}</option>)}
+            {assignments.map((a) => <option key={a.id} value={a.id}>{a.date?.slice(0, 10)} {a.start_time?.slice(0, 5)}–{a.end_time?.slice(0, 5)}</option>)}
           </Select>
         </Field>
         <Field label="My role in this shift">
