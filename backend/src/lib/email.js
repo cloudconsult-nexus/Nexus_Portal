@@ -15,14 +15,15 @@ function getTransporter() {
 // No SMTP_HOST configured (e.g. local dev, or a test environment that
 // doesn't need real delivery) — log instead of sending. RUNBOOK.md's
 // "Email not sending" section greps logs for this exact prefix.
-export async function sendEmail({ to, subject, html }) {
+export async function sendEmail({ to, subject, html, fromName }) {
   if (!process.env.SMTP_HOST) {
     console.log(`[email:dev] would send to ${to}: ${subject}`);
     return { delivered: false };
   }
 
+  const fromAddress = process.env.SMTP_FROM || 'no-reply@example.com';
   await getTransporter().sendMail({
-    from: process.env.SMTP_FROM || 'no-reply@example.com',
+    from: fromName ? `"${fromName}" <${fromAddress}>` : fromAddress,
     to,
     subject,
     html,

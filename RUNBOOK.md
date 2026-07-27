@@ -136,6 +136,46 @@ Same pattern for `-web`. This doesn't undo a database migration — see
 "Database restore" below if a bad deploy also shipped a destructive
 migration.
 
+## Outbound email (Google Workspace)
+
+Invite and password-reset emails go through Nodemailer's generic SMTP
+transport (`backend/src/lib/email.js`) — there's no GCP-native "send email"
+resource, just Terraform-managed env vars (`infra/variables.tf`) and a
+Secret Manager entry (`infra/secrets.tf`, created only when `smtp_password`
+is non-empty) feeding Cloud Run. `test` is currently configured to send
+through a dedicated **Google Workspace mailbox**,
+`no-reply@cloudconsult.technology`, via Gmail's SMTP endpoint — chosen over
+a third-party ESP (SendGrid/Mailgun) since cloudconsult.technology already
+has an active Workspace subscription, which sidesteps any separate
+domain-authentication (SPF/DKIM CNAME) setup entirely.
+
+- `infra/envs/test.tfvars`: `smtp_host = "smtp.gmail.com"`, `smtp_port =
+  587`, `smtp_user = "no-reply@cloudconsult.technology"`, `smtp_from =
+  "no-reply@cloudconsult.technology"`.
+- `smtp_password` is an **App Password** generated from that mailbox's own
+  Google Account (myaccount.google.com/apppasswords — requires 2-Step
+  Verification enabled on the account first), supplied only via
+  `TF_VAR_smtp_password` at apply time — never committed to any `.tfvars`
+  file.
+- Sending limit is Gmail's standard ~2,000 recipients/day per account —
+  fine for transactional invite/reset volume. If that's ever outgrown, the
+  next step up is Workspace's SMTP relay service (Admin console → Apps →
+  Google Workspace → Gmail → Routing), which raises the cap to ~10,000/day
+  but authenticates by allow-listed source IP rather than username/
+  password — that needs a static outbound IP for Cloud Run (Serverless VPC
+  Access + Cloud NAT), which isn't set up today.
+- The "From" display name and email subject/body copy are white-label-aware
+  (`backend/src/lib/branding.js`'s `getProductName()`) — they read
+  `tas_settings.name_override` (falling back to `tas_settings.name`, then
+  the literal "Nexus Portal") so a rebranded deployment's outbound mail
+  says e.g. "Pioneer TAS Nexus Portal" without any code change.
+
+To onboard a new tenant or rotate the app password, set
+`TF_VAR_smtp_password` and apply — see "Onboarding a new tenant" and
+"Secret rotation" below. `prod.tfvars` doesn't have SMTP configured yet;
+copy the same `smtp_host`/`smtp_port`/`smtp_user`/`smtp_from` lines from
+`test.tfvars` (with its own sending mailbox, if different) when ready.
+
 ## Secret rotation
 
 ```bash
@@ -209,9 +249,13 @@ gsutil cp gs://oncall-pro-prod-branding-<project-id>/<path>#<generation> gs://on
   crash on boot (usually a bad `DB_PASSWORD`/`JWT_SECRET` or an unreachable
   Cloud SQL instance).
 - **Email not sending**: check `SMTP_HOST` is actually set for this
-  environment (`infra/envs/prod.tfvars`) — if unset, invites/resets are
-  silently only logged to Cloud Logging, never delivered. Search logs for
-  `[email:dev] would send to` to confirm this is what's happening.
+  environment (`infra/envs/prod.tfvars` doesn't have it yet — see "Outbound
+  email (SendGrid)" below) — if unset, invites/resets are silently only
+  logged to Cloud Logging, never delivered. Search logs for
+  `[email:dev] would send to` to confirm this is what's happening. If
+  `SMTP_HOST` is set but mail still isn't arriving, check SendGrid's
+  Activity feed for bounces/blocks (often an unauthenticated sending
+  domain) before assuming it's an app bug.
 
 ## Scaling & cost knobs
 

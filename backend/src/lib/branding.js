@@ -37,3 +37,14 @@ export async function getEffectiveBranding(organizationId) {
   if (effective.favicon_url) effective.favicon_url = await resolveAssetUrl(effective.favicon_url);
   return { ...effective, sources: sourceIds };
 }
+
+// The instance-wide white-label display name used in outbound email (From
+// header, subject lines) — same name_override-then-name fallback the UI's
+// BrandedHeader uses, suffixed with the product name so a white-labeled
+// deployment (e.g. "Pioneer TAS") still identifies itself as running Nexus
+// Portal rather than just showing the client's own name.
+export async function getProductName() {
+  const { rows } = await pool.query('SELECT name, name_override FROM tas_settings LIMIT 1');
+  const brand = rows[0]?.name_override || rows[0]?.name;
+  return brand ? `${brand} Nexus Portal` : 'Nexus Portal';
+}

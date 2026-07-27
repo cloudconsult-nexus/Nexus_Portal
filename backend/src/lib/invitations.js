@@ -2,6 +2,7 @@ import pool from '../db/pool.js';
 import { generateToken, hashToken } from './inviteToken.js';
 import { sendEmail } from './email.js';
 import { inviteEmail } from './emailTemplates.js';
+import { getProductName } from './branding.js';
 
 const EXPIRY_DAYS = Number(process.env.INVITE_EXPIRY_DAYS || 7);
 
@@ -22,9 +23,14 @@ export async function createInvitation({ personId, organizationId, email, name, 
     [personId, organizationId, email, name, role, tokenHash, invitedById, expiresAt]
   );
 
+  const [{ rows: orgRows }, productName] = await Promise.all([
+    pool.query('SELECT name FROM organizations WHERE id = $1', [organizationId]),
+    getProductName(),
+  ]);
+
   const acceptUrl = `${webOrigin()}/accept-invite?token=${token}`;
-  const { subject, html } = inviteEmail({ name, acceptUrl, orgName: null });
-  await sendEmail({ to: email, subject, html });
+  const { subject, html } = inviteEmail({ name, acceptUrl, orgName: orgRows[0]?.name || null, productName });
+  await sendEmail({ to: email, subject, html, fromName: productName });
 
   return { expiresAt };
 }

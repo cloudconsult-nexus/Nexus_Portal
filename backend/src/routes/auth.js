@@ -9,6 +9,7 @@ import { generateToken, hashToken } from '../lib/inviteToken.js';
 import { findValidInvitation, markAccepted } from '../lib/invitations.js';
 import { sendEmail } from '../lib/email.js';
 import { passwordResetEmail } from '../lib/emailTemplates.js';
+import { getProductName } from '../lib/branding.js';
 import jwt from 'jsonwebtoken';
 
 const router = Router();
@@ -138,8 +139,9 @@ router.post('/forgot-password', async (req, res) => {
       expiresIn: '1h',
     });
     const resetUrl = `${(process.env.CORS_ORIGIN || '').split(',')[0]}/reset-password?token=${resetToken}`;
-    const { subject, html } = passwordResetEmail({ name: person.name, resetUrl });
-    await sendEmail({ to: person.email, subject, html });
+    const productName = await getProductName();
+    const { subject, html } = passwordResetEmail({ name: person.name, resetUrl, productName });
+    await sendEmail({ to: person.email, subject, html, fromName: productName });
   }
   res.status(204).end();
 });

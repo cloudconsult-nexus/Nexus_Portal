@@ -5,13 +5,13 @@ export default function BrandedHeader({ branding }) {
   const name = branding?.nameOverride || 'Nexus Portal';
 
   return (
-    <div className="px-4 py-5 border-b border-white/10">
+    <div className="px-4 py-5 bg-white border-b border-line">
       {branding?.logoUrl ? (
         <img src={branding.logoUrl} alt={name} className="h-10 w-10 object-contain object-left" />
       ) : (
-        <span className="text-lg font-semibold tracking-tight text-white">{name}</span>
+        <span className="text-lg font-semibold tracking-tight text-ink">{name}</span>
       )}
-      {branding?.tagline && <p className="text-xs text-white/50 mt-1 truncate">{branding.tagline}</p>}
+      {branding?.tagline && <p className="text-xs text-muted mt-1 truncate">{branding.tagline}</p>}
     </div>
   );
 }
