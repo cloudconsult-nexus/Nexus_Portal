@@ -3,7 +3,7 @@ import { Plus, Pencil, Trash2, Search } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { isAdmin, ROLE_LABELS, ROLE_BADGE_TONE } from '../lib/roles.js';
-import { PageHeader, Card, Button, Input, Field, Select, Checkbox, Table, Modal, ConfirmDialog, LoadingBlock, EmptyState, ErrorBanner, Badge } from '../components/ui.jsx';
+import { PageHeader, Card, Button, Input, Field, Select, Checkbox, Modal, ConfirmDialog, LoadingBlock, EmptyState, ErrorBanner, Badge } from '../components/ui.jsx';
 import OrganizationSelector from '../components/OrganizationSelector.jsx';
 import PhotoUpload from '../components/PhotoUpload.jsx';
 
@@ -22,6 +22,7 @@ export default function People() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -43,7 +44,11 @@ export default function People() {
 
   useEffect(() => { load(); }, []);
 
-  const filtered = people.filter((p) => !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.email?.toLowerCase().includes(search.toLowerCase()));
+  const filtered = people.filter((p) => {
+    const matchesSearch = !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.email?.toLowerCase().includes(search.toLowerCase());
+    const matchesRole = !roleFilter || p.role === roleFilter;
+    return matchesSearch && matchesRole;
+  });
 
   function openCreate() {
     setEditing(null);
@@ -103,40 +108,57 @@ export default function People() {
       />
       <div className="p-8 space-y-4">
         {error && <ErrorBanner message={error} />}
-        <div className="relative max-w-xs">
-          <Search size={14} className="absolute left-2.5 top-2.5 text-muted" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search people…" className="pl-8" />
+        <div className="flex items-center gap-3">
+          <div className="relative max-w-xs flex-1">
+            <Search size={14} className="absolute left-2.5 top-2.5 text-muted" />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search people…" className="pl-8" />
+          </div>
+          <Select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} className="max-w-[10rem]">
+            <option value="">All roles</option>
+            {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+          </Select>
         </div>
 
-        <Card>
-          {loading ? <LoadingBlock /> : filtered.length === 0 ? <EmptyState title="No people found" /> : (
-            <Table columns={[{ label: '' }, 'Name', 'Role', 'Email', 'Phone', 'Department', 'Status', { label: '' }]}>
-              {filtered.map((p) => (
-                <tr key={p.id} className="hover:bg-surface">
-                  <td className="px-4 py-2.5">
-                    <div className="h-7 w-7 rounded-full overflow-hidden bg-surface border border-line flex items-center justify-center">
-                      {p.photo_url ? <img src={p.photo_url} alt="" className="h-full w-full object-cover" /> : <span className="text-[10px] text-muted">{p.name?.[0]}</span>}
+        {loading ? <LoadingBlock /> : filtered.length === 0 ? <EmptyState title="No people found" /> : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {filtered.map((p) => (
+              <Card
+                key={p.id}
+                className="p-4 space-y-3 cursor-pointer hover:border-signal-amber/40 transition-colors"
+                onClick={() => canEdit && openEdit(p)}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="h-10 w-10 rounded-full overflow-hidden bg-surface border border-line flex items-center justify-center shrink-0">
+                    {p.photo_url ? <img src={p.photo_url} alt="" className="h-full w-full object-cover" /> : <span className="text-xs text-muted">{p.name?.[0]}</span>}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-ink truncate">{p.name}</p>
+                    <p className="text-xs text-muted truncate">{p.email || '—'}</p>
+                  </div>
+                  {canEdit && (
+                    <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <button onClick={() => openEdit(p)} className="p-1.5 rounded hover:bg-surface text-muted hover:text-ink"><Pencil size={14} /></button>
+                      <button onClick={() => setDeleteTarget(p)} className="p-1.5 rounded hover:bg-surface text-muted hover:text-signal-red"><Trash2 size={14} /></button>
                     </div>
-                  </td>
-                  <td className="px-4 py-2.5 font-medium text-ink">{p.name}</td>
-                  <td className="px-4 py-2.5"><Badge tone={ROLE_BADGE_TONE[p.role]}>{ROLE_LABELS[p.role]}</Badge></td>
-                  <td className="px-4 py-2.5 text-muted">{p.email || '—'}</td>
-                  <td className="px-4 py-2.5 text-muted font-mono text-xs">{p.primary_phone || '—'}</td>
-                  <td className="px-4 py-2.5 text-muted">{p.department || '—'}</td>
-                  <td className="px-4 py-2.5">{p.is_active ? <Badge tone="green">Active</Badge> : <Badge tone="neutral">Inactive</Badge>}</td>
-                  <td className="px-4 py-2.5">
-                    {canEdit && (
-                      <div className="flex items-center gap-1 justify-end">
-                        <button onClick={() => openEdit(p)} className="p-1.5 rounded hover:bg-white text-muted hover:text-ink"><Pencil size={14} /></button>
-                        <button onClick={() => setDeleteTarget(p)} className="p-1.5 rounded hover:bg-white text-muted hover:text-signal-red"><Trash2 size={14} /></button>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </Table>
-          )}
-        </Card>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge tone={ROLE_BADGE_TONE[p.role]}>{ROLE_LABELS[p.role]}</Badge>
+                  {p.is_active ? <Badge tone="green">Active</Badge> : <Badge tone="neutral">Inactive</Badge>}
+                </div>
+
+                {(p.job_title || p.department) && (
+                  <p className="text-xs text-muted truncate">{[p.job_title, p.department].filter(Boolean).join(' · ')}</p>
+                )}
+
+                <div className="pt-2 border-t border-line text-xs text-muted">
+                  {p.last_active_at ? `Last active ${new Date(p.last_active_at).toLocaleString()}` : 'Never logged in'}
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Edit person' : 'Add person'} size="lg"

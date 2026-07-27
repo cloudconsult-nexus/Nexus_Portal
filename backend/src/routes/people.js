@@ -23,7 +23,8 @@ router.get('/', async (req, res) => {
   const scopeOrgId = req.user.role === 'global_admin' ? null : req.user.organizationId;
   const { rows } = await pool.query(
     `SELECT id, organization_id, name, email, primary_phone, sms_phone, secondary_phone,
-            department, job_title, role, can_edit_schedule, is_active, photo_url, login_enabled
+            department, job_title, role, can_edit_schedule, is_active, photo_url, login_enabled,
+            last_active_at
      FROM people
      WHERE is_deleted = false AND ($1::uuid IS NULL OR organization_id = $1)
      ORDER BY name`,
