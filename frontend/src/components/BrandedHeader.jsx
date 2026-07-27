@@ -7,11 +7,11 @@ export default function BrandedHeader({ branding }) {
   return (
     <div className="px-4 py-5 bg-white border-b border-line">
       {branding?.logoUrl ? (
-        <img src={branding.logoUrl} alt={name} className="h-10 w-10 object-contain object-left" />
+        <img src={branding.logoUrl} alt={name} className="h-16 w-16 object-contain object-left" />
       ) : (
         <span className="text-lg font-semibold tracking-tight text-ink">{name}</span>
       )}
-      {branding?.tagline && <p className="text-xs text-muted mt-1 truncate">{branding.tagline}</p>}
+      {branding?.tagline && <p className="text-sm font-bold text-ink mt-1.5 truncate">{branding.tagline}</p>}
     </div>
   );
 }
