@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import multer from 'multer';
+import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import pool from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireRole } from '../middleware/rbac.js';
 import { auditContext } from '../middleware/audit.js';
 import { assetKey, uploadAsset, resolveAssetUrl } from '../lib/storage.js';
-import { createInvitation } from '../lib/invitations.js';
+import { createInvitation, revokePendingForPerson } from '../lib/invitations.js';
 import { resolveScopedOrgIds } from '../lib/orgScope.js';
 
 const router = Router();
@@ -56,22 +57,34 @@ const createSchema = z.object({
   role: z.enum(['global_admin', 'customer_admin', 'user']).default('user'),
   canEditSchedule: z.boolean().default(false),
   sendInvite: z.boolean().optional(),
+  // Global-Admin-only alternative to the email invite: activates the
+  // account immediately with this password instead of waiting on
+  // invite delivery/acceptance.
+  password: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(8).optional()),
 });
 
 router.post('/', requireRole('customer_admin'), async (req, res) => {
   const input = createSchema.parse(req.body);
   const scopedIds = await resolveScopedOrgIds(req);
   if (!scopeAllows(scopedIds, input.organizationId)) return res.status(403).json({ error: 'Insufficient permissions' });
+  if (input.password && req.user.role !== 'global_admin') {
+    return res.status(403).json({ error: 'Only Global Admins can set a password directly.' });
+  }
+
+  const passwordHash = input.password ? await bcrypt.hash(input.password, 12) : null;
 
   const { rows } = await pool.query(
-    `INSERT INTO people (organization_id, name, email, primary_phone, sms_phone, secondary_phone, department, job_title, role, can_edit_schedule)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+    `INSERT INTO people (organization_id, name, email, primary_phone, sms_phone, secondary_phone, department, job_title, role, can_edit_schedule, password_hash, login_enabled)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
     [input.organizationId, input.name, input.email || null, input.primaryPhone || null, input.smsPhone || null,
-     input.secondaryPhone || null, input.department || null, input.jobTitle || null, input.role, input.canEditSchedule]
+     input.secondaryPhone || null, input.department || null, input.jobTitle || null, input.role, input.canEditSchedule,
+     passwordHash, !!input.password]
   );
   const person = rows[0];
 
-  if (input.sendInvite && input.email) {
+  // A directly-set password already activates the account — skip the
+  // invite entirely rather than sending a now-redundant one.
+  if (!input.password && input.sendInvite && input.email) {
     await createInvitation({
       personId: person.id,
       organizationId: input.organizationId,
@@ -82,7 +95,10 @@ router.post('/', requireRole('customer_admin'), async (req, res) => {
     });
   }
 
-  await req.logAudit({ action: 'create', entityType: 'person', entityId: person.id, entityName: person.name, organizationId: input.organizationId });
+  await req.logAudit({
+    action: 'create', entityType: 'person', entityId: person.id, entityName: person.name, organizationId: input.organizationId,
+    newValues: { activationMethod: input.password ? 'admin_set_password' : (input.sendInvite ? 'email_invite' : 'none') },
+  });
   const { password_hash, mfa_secret, ...safe } = person;
   res.status(201).json({ person: await withResolvedPhoto(safe) });
 });
@@ -136,6 +152,31 @@ router.put('/:id', requireRole('customer_admin'), async (req, res) => {
 
   const { password_hash, mfa_secret, ...safe } = rows[0];
   res.json({ person: await withResolvedPhoto(safe) });
+});
+
+const setPasswordSchema = z.object({ password: z.string().min(8) });
+
+// Global-Admin-only: set/reset a person's password directly, activating
+// (or reactivating) their account without an email invite/reset round
+// trip. Also clears any lockout and revokes a still-pending invite, so a
+// stale invite link can't later overwrite the password an admin just set.
+router.post('/:id/set-password', requireRole('global_admin'), async (req, res) => {
+  const { password } = setPasswordSchema.parse(req.body);
+  const { rows: existingRows } = await pool.query('SELECT id, name FROM people WHERE id = $1 AND is_deleted = false', [req.params.id]);
+  const existing = existingRows[0];
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+
+  const passwordHash = await bcrypt.hash(password, 12);
+  await pool.query(
+    `UPDATE people SET password_hash = $1, login_enabled = true, is_active = true,
+       failed_login_attempts = 0, locked_until = NULL, updated_at = now()
+     WHERE id = $2`,
+    [passwordHash, req.params.id]
+  );
+  await revokePendingForPerson(req.params.id);
+
+  await req.logAudit({ action: 'set_password', entityType: 'person', entityId: req.params.id, entityName: existing.name });
+  res.status(204).end();
 });
 
 router.post('/:id/photo', upload.single('photo'), async (req, res) => {

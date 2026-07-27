@@ -4,7 +4,7 @@ import { api } from '../lib/api.js';
 import { exportTableToPdf } from '../lib/pdfExport.js';
 import { PageHeader, Card, Button, Input, Field, Select, Table, Badge, LoadingBlock, EmptyState, ErrorBanner } from '../components/ui.jsx';
 
-const ACTION_TONE = { create: 'green', update: 'blue', delete: 'red', move: 'amber', restore: 'green', role_change: 'amber', login: 'neutral', logout: 'neutral', view: 'neutral' };
+const ACTION_TONE = { create: 'green', update: 'blue', delete: 'red', move: 'amber', restore: 'green', role_change: 'amber', set_password: 'amber', login: 'neutral', logout: 'neutral', view: 'neutral' };
 const ENTITY_TYPES = ['organization', 'person', 'calendar', 'assignment', 'shift_swap_request', 'status_alert', 'report_mapping', 'import_batch', 'invitation'];
 
 export default function AuditLogs() {
@@ -60,7 +60,7 @@ export default function AuditLogs() {
           <Field label="Action">
             <Select value={filters.action} onChange={(e) => setFilters({ ...filters, action: e.target.value })}>
               <option value="">All</option>
-              {['create', 'update', 'delete', 'move', 'restore', 'role_change', 'login', 'logout', 'view'].map((a) => <option key={a} value={a}>{a}</option>)}
+              {['create', 'update', 'delete', 'move', 'restore', 'role_change', 'set_password', 'login', 'logout', 'view'].map((a) => <option key={a} value={a}>{a}</option>)}
             </Select>
           </Field>
           <Field label="From"><Input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} /></Field>

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, Search } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../context/AuthContext.jsx';
-import { isAdmin, ROLE_LABELS, ROLE_BADGE_TONE } from '../lib/roles.js';
+import { isAdmin, isGlobalAdmin, ROLE_LABELS, ROLE_BADGE_TONE } from '../lib/roles.js';
 import { PageHeader, Card, Button, Input, Field, Select, Checkbox, Modal, ConfirmDialog, LoadingBlock, EmptyState, ErrorBanner, Badge } from '../components/ui.jsx';
 import OrganizationSelector from '../components/OrganizationSelector.jsx';
 import PhotoUpload from '../components/PhotoUpload.jsx';
@@ -11,12 +11,21 @@ const ROLES = ['global_admin', 'customer_admin', 'user'];
 
 const EMPTY_FORM = {
   name: '', organizationId: '', email: '', primaryPhone: '', smsPhone: '', secondaryPhone: '',
-  department: '', jobTitle: '', role: 'user', canEditSchedule: false, sendInvite: true,
+  department: '', jobTitle: '', role: 'user', canEditSchedule: false, sendInvite: true, password: '',
 };
+
+// Cheap random password for the "generate" convenience button — the admin
+// copies it out of the field to hand to the person directly, it's never
+// stored or displayed anywhere after submission.
+function generatePassword() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+  return Array.from({ length: 14 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+}
 
 export default function People() {
   const { user } = useAuth();
   const canEdit = isAdmin(user);
+  const isGA = isGlobalAdmin(user);
 
   const [people, setPeople] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -30,6 +39,15 @@ export default function People() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
+
+  // Create-only: Global Admin can activate the account immediately with a
+  // password instead of an email invite.
+  const [activationMethod, setActivationMethod] = useState('invite');
+  // Edit-only: Global Admin can (re)set an existing person's password —
+  // a separate action/endpoint from the main Save, not part of `form`.
+  const [resettingPassword, setResettingPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [passwordAction, setPasswordAction] = useState({ saving: false, message: '', error: '' });
 
   async function load() {
     setLoading(true);
@@ -54,6 +72,7 @@ export default function People() {
   function openCreate() {
     setEditing(null);
     setForm(EMPTY_FORM);
+    setActivationMethod('invite');
     setModalOpen(true);
   }
 
@@ -66,6 +85,9 @@ export default function People() {
       department: full.department || '', jobTitle: full.job_title || '', role: full.role,
       canEditSchedule: full.can_edit_schedule || false, sendInvite: false,
     });
+    setResettingPassword(false);
+    setNewPassword('');
+    setPasswordAction({ saving: false, message: '', error: '' });
     setModalOpen(true);
   }
 
@@ -73,10 +95,12 @@ export default function People() {
     setSaving(true);
     setError('');
     try {
+      const payload = { ...form };
+      if (!payload.password) delete payload.password;
       if (editing) {
-        await api.put(`/people/${editing.id}`, form);
+        await api.put(`/people/${editing.id}`, payload);
       } else {
-        await api.post('/people', form);
+        await api.post('/people', payload);
       }
       setModalOpen(false);
       await load();
@@ -84,6 +108,19 @@ export default function People() {
       setError(err.message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleSetPassword() {
+    setPasswordAction({ saving: true, message: '', error: '' });
+    try {
+      await api.post(`/people/${editing.id}/set-password`, { password: newPassword });
+      setPasswordAction({ saving: false, message: 'Password updated — share it with the person directly.', error: '' });
+      setNewPassword('');
+      setResettingPassword(false);
+      await load();
+    } catch (err) {
+      setPasswordAction({ saving: false, message: '', error: err.message });
     }
   }
 
@@ -168,7 +205,10 @@ export default function People() {
       </div>
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Edit person' : 'Add person'} size="lg"
-        footer={<><Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button><Button onClick={handleSave} loading={saving} disabled={!form.name || !form.organizationId}>{editing ? 'Save' : 'Create'}</Button></>}>
+        footer={<><Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button><Button onClick={handleSave} loading={saving}
+          disabled={!form.name || !form.organizationId || (!editing && isGA && activationMethod === 'password' && form.password.length < 8)}>
+          {editing ? 'Save' : 'Create'}
+        </Button></>}>
         <div className="space-y-4">
           {editing && (
             <Field label="Photo">
@@ -196,7 +236,65 @@ export default function People() {
             <Checkbox label="Can edit the schedule" checked={form.canEditSchedule} onChange={(e) => setForm({ ...form, canEditSchedule: e.target.checked })} />
           )}
           {!editing && form.email && (
-            <Checkbox label="Send an invitation email" checked={form.sendInvite} onChange={(e) => setForm({ ...form, sendInvite: e.target.checked })} />
+            isGA ? (
+              <div className="space-y-2">
+                <span className="block text-xs font-medium text-ink">Account activation</span>
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-1.5 text-sm text-ink cursor-pointer">
+                    <input type="radio" checked={activationMethod === 'invite'}
+                      onChange={() => { setActivationMethod('invite'); setForm({ ...form, sendInvite: true, password: '' }); }} />
+                    Send an invitation email
+                  </label>
+                  <label className="flex items-center gap-1.5 text-sm text-ink cursor-pointer">
+                    <input type="radio" checked={activationMethod === 'password'}
+                      onChange={() => setActivationMethod('password')} />
+                    Set a password now
+                  </label>
+                  <label className="flex items-center gap-1.5 text-sm text-ink cursor-pointer">
+                    <input type="radio" checked={activationMethod === 'none'}
+                      onChange={() => { setActivationMethod('none'); setForm({ ...form, sendInvite: false, password: '' }); }} />
+                    Not yet
+                  </label>
+                </div>
+                {activationMethod === 'password' && (
+                  <div className="flex items-end gap-2">
+                    <Field label="Password" hint="At least 8 characters — share it with the person directly, it's never shown again.">
+                      <Input value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Enter or generate a password" />
+                    </Field>
+                    <Button type="button" variant="secondary" onClick={() => setForm({ ...form, password: generatePassword() })}>Generate</Button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <Checkbox label="Send an invitation email" checked={form.sendInvite} onChange={(e) => setForm({ ...form, sendInvite: e.target.checked })} />
+            )
+          )}
+
+          {editing && isGA && (
+            <div className="rounded-lg border border-line p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-ink">Password</span>
+                {!resettingPassword && (
+                  <Button type="button" size="sm" variant="secondary" onClick={() => setResettingPassword(true)}>Set new password</Button>
+                )}
+              </div>
+              {resettingPassword && (
+                <div className="space-y-2">
+                  <div className="flex items-end gap-2">
+                    <Field label="New password" hint="At least 8 characters.">
+                      <Input value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Enter or generate a password" />
+                    </Field>
+                    <Button type="button" variant="secondary" onClick={() => setNewPassword(generatePassword())}>Generate</Button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button type="button" size="sm" onClick={handleSetPassword} loading={passwordAction.saving} disabled={newPassword.length < 8}>Set password</Button>
+                    <Button type="button" size="sm" variant="ghost" onClick={() => { setResettingPassword(false); setNewPassword(''); }}>Cancel</Button>
+                  </div>
+                </div>
+              )}
+              {passwordAction.message && <p className="text-xs text-signal-green">{passwordAction.message}</p>}
+              {passwordAction.error && <p className="text-xs text-signal-red">{passwordAction.error}</p>}
+            </div>
           )}
         </div>
       </Modal>

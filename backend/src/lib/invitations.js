@@ -51,3 +51,11 @@ export async function markAccepted(invitationId) {
 export async function revokeInvitation(invitationId) {
   await pool.query(`UPDATE invitations SET status = 'revoked' WHERE id = $1`, [invitationId]);
 }
+
+// Called when an admin sets a person's password directly — otherwise a
+// still-pending invite link would let anyone holding it later overwrite
+// that password (and reset the person's role back to whatever the
+// invitation recorded) by completing accept-invite.
+export async function revokePendingForPerson(personId) {
+  await pool.query(`UPDATE invitations SET status = 'revoked' WHERE person_id = $1 AND status = 'pending'`, [personId]);
+}
