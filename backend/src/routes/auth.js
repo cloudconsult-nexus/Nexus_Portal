@@ -141,7 +141,13 @@ router.post('/forgot-password', async (req, res) => {
     const resetUrl = `${(process.env.CORS_ORIGIN || '').split(',')[0]}/reset-password?token=${resetToken}`;
     const productName = await getProductName();
     const { subject, html } = passwordResetEmail({ name: person.name, resetUrl, productName });
-    await sendEmail({ to: person.email, subject, html, fromName: productName });
+    try {
+      await sendEmail({ to: person.email, subject, html, fromName: productName });
+    } catch (err) {
+      // Still 204 regardless — an SMTP outage must not turn into a
+      // signal that distinguishes a real account from a nonexistent one.
+      console.error('Password reset email failed to send', err);
+    }
   }
   res.status(204).end();
 });

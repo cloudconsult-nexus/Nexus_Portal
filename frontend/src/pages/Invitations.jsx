@@ -10,6 +10,7 @@ export default function Invitations() {
   const [invitations, setInvitations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [busyId, setBusyId] = useState(null);
 
   async function load() {
@@ -29,8 +30,12 @@ export default function Invitations() {
   async function act(id, action) {
     setBusyId(id);
     setError('');
+    setNotice('');
     try {
-      await api.post(`/invitations/${id}/${action}`);
+      const data = await api.post(`/invitations/${id}/${action}`);
+      if (action === 'resend' && data?.emailDelivered === false) {
+        setNotice('The invitation was re-issued, but the email failed to send. Check email delivery configuration and resend again.');
+      }
       await load();
     } catch (err) {
       setError(err.message);
@@ -44,6 +49,7 @@ export default function Invitations() {
       <PageHeader title="Invitations" description="Pending and past invitations sent from the People page." />
       <div className="p-8 space-y-4">
         {error && <ErrorBanner message={error} />}
+        {notice && <ErrorBanner message={notice} tone="amber" />}
         {loading ? <LoadingBlock /> : invitations.length === 0 ? (
           <EmptyState title="No invitations sent yet" description="Invite people from the People page when creating or editing them." />
         ) : (

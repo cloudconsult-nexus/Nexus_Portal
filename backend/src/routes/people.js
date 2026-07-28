@@ -108,23 +108,24 @@ router.post('/', requireRole('customer_admin'), async (req, res) => {
 
   // A directly-set password already activates the account — skip the
   // invite entirely rather than sending a now-redundant one.
+  let emailDelivered = null;
   if (!input.password && input.sendInvite && input.email) {
-    await createInvitation({
+    ({ emailDelivered } = await createInvitation({
       personId: person.id,
       organizationId: input.organizationId,
       email: input.email,
       name: input.name,
       role: input.role,
       invitedById: req.user.id,
-    });
+    }));
   }
 
   await req.logAudit({
     action: 'create', entityType: 'person', entityId: person.id, entityName: person.name, organizationId: input.organizationId,
-    newValues: { activationMethod: input.password ? 'admin_set_password' : (input.sendInvite ? 'email_invite' : 'none') },
+    newValues: { activationMethod: input.password ? 'admin_set_password' : (input.sendInvite ? 'email_invite' : 'none'), emailDelivered },
   });
   const { password_hash, mfa_secret, ...safe } = person;
-  res.status(201).json({ person: await withResolvedPhoto(safe) });
+  res.status(201).json({ person: await withResolvedPhoto(safe), emailDelivered });
 });
 
 router.put('/:id', requireRole('customer_admin'), async (req, res) => {

@@ -30,9 +30,19 @@ export async function createInvitation({ personId, organizationId, email, name, 
 
   const acceptUrl = `${webOrigin()}/accept-invite?token=${token}`;
   const { subject, html } = inviteEmail({ name, acceptUrl, orgName: orgRows[0]?.name || null, productName });
-  await sendEmail({ to: email, subject, html, fromName: productName });
 
-  return { expiresAt };
+  // The invitation row above is the durable record — a resend can always
+  // recover from delivery failure, so an SMTP outage shouldn't take down
+  // the person/invitation creation that already succeeded.
+  let emailDelivered = true;
+  try {
+    await sendEmail({ to: email, subject, html, fromName: productName });
+  } catch (err) {
+    console.error('Invite email failed to send', err);
+    emailDelivered = false;
+  }
+
+  return { expiresAt, emailDelivered };
 }
 
 export async function findValidInvitation(token) {

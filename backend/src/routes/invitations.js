@@ -20,7 +20,7 @@ router.post('/:id/resend', async (req, res) => {
   if (!existing) return res.status(400).json({ error: 'Invitation is not pending' });
 
   await revokeInvitation(existing.id);
-  await createInvitation({
+  const { emailDelivered } = await createInvitation({
     personId: existing.person_id,
     organizationId: existing.organization_id,
     email: existing.email,
@@ -28,7 +28,7 @@ router.post('/:id/resend', async (req, res) => {
     role: existing.role,
     invitedById: req.user.id,
   });
-  res.status(204).end();
+  res.json({ emailDelivered });
 });
 
 router.post('/:id/revoke', async (req, res) => {

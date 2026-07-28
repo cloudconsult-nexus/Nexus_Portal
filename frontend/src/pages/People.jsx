@@ -30,6 +30,7 @@ export default function People() {
   const [people, setPeople] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [viewOrgId, setViewOrgId] = useState(null);
@@ -146,13 +147,17 @@ export default function People() {
   async function handleSave() {
     setSaving(true);
     setError('');
+    setNotice('');
     try {
       const payload = { ...form };
       if (!payload.password) delete payload.password;
       if (editing) {
         await api.put(`/people/${editing.id}`, payload);
       } else {
-        await api.post('/people', payload);
+        const { emailDelivered } = await api.post('/people', payload);
+        if (emailDelivered === false) {
+          setNotice(`${form.name} was created, but the invitation email failed to send. Resend it from the Invitations page once email delivery is fixed.`);
+        }
       }
       setModalOpen(false);
       await load();
@@ -198,6 +203,7 @@ export default function People() {
       />
       <div className="p-8 space-y-4">
         {error && <ErrorBanner message={error} />}
+        {notice && <ErrorBanner message={notice} tone="amber" />}
         <div className="flex items-center gap-3">
           <div className="relative max-w-xs flex-1">
             <Search size={14} className="absolute left-2.5 top-2.5 text-muted" />

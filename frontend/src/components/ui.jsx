@@ -150,10 +150,15 @@ export function EmptyState({ icon: Icon = Inbox, title, description, action }) {
   );
 }
 
-export function ErrorBanner({ message, className = '' }) {
+const BANNER_TONES = {
+  red: 'border-signal-red/30 bg-signal-red/5 text-signal-red',
+  amber: 'border-signal-amber/30 bg-signal-amber/5 text-amber-700',
+};
+
+export function ErrorBanner({ message, tone = 'red', className = '' }) {
   if (!message) return null;
   return (
-    <div className={`flex items-start gap-2 rounded-lg border border-signal-red/30 bg-signal-red/5 px-3 py-2 text-sm text-signal-red ${className}`}>
+    <div className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${BANNER_TONES[tone]} ${className}`}>
       <AlertTriangle size={16} className="shrink-0 mt-0.5" />
       <span>{message}</span>
     </div>
