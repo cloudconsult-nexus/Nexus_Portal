@@ -190,7 +190,7 @@ export default function Schedule() {
         title="Schedule"
         description="Click a shift to edit it. Past shifts are read-only."
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {canFilterByLevel && (
               <div className="w-56">
                 <OrganizationSelector value={viewOrgId} onChange={setViewOrgId} allowClear clearLabel="All Customers" placeholder="All Customers" />
@@ -210,7 +210,7 @@ export default function Schedule() {
       />
       <Tabs tabs={VIEWS} active={view} onChange={setView} />
 
-      <div className="px-8 py-4 flex items-center gap-3">
+      <div className="px-4 sm:px-8 py-4 flex items-center gap-3 flex-wrap">
         <button onClick={() => navigate(-1)} className="p-1.5 rounded hover:bg-surface text-muted"><ChevronLeft size={16} /></button>
         <span className="text-sm font-medium text-ink">
           {view === 'month'
@@ -221,7 +221,7 @@ export default function Schedule() {
         <Button variant="ghost" size="sm" onClick={() => setAnchor(new Date())}>Today</Button>
       </div>
 
-      <div className="px-8 pb-8 space-y-3">
+      <div className="px-4 sm:px-8 pb-8 space-y-3">
         {error && <ErrorBanner message={error} />}
 
         {!calendarId ? (
@@ -273,24 +273,28 @@ function ShiftCard({ shift, peopleById, canEdit, onEdit, onDelete }) {
 function WeekGrid({ rangeStart, byDate, peopleById, canEdit, onCreate, onEdit, onDelete }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(rangeStart, i));
   return (
-    <div className="grid grid-cols-7 gap-3">
-      {days.map((d) => {
-        const key = toISODate(d);
-        const shifts = byDate[key] || [];
-        return (
-          <div key={key} className="min-h-[10rem]">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-medium text-muted">{d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })}</p>
-              {canEdit && !isPast(key) && (
-                <button onClick={() => onCreate(key)} className="text-muted hover:text-ink"><Plus size={13} /></button>
-              )}
+    // 7 fixed columns never fit a phone-width viewport — scroll horizontally
+    // within this container instead of overflowing the whole page.
+    <div className="overflow-x-auto">
+      <div className="grid grid-cols-7 gap-3 min-w-[700px]">
+        {days.map((d) => {
+          const key = toISODate(d);
+          const shifts = byDate[key] || [];
+          return (
+            <div key={key} className="min-h-[10rem]">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium text-muted">{d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })}</p>
+                {canEdit && !isPast(key) && (
+                  <button onClick={() => onCreate(key)} className="text-muted hover:text-ink"><Plus size={13} /></button>
+                )}
+              </div>
+              <div className="space-y-2">
+                {shifts.map((s) => <ShiftCard key={s.id} shift={s} peopleById={peopleById} canEdit={canEdit} onEdit={onEdit} onDelete={onDelete} />)}
+              </div>
             </div>
-            <div className="space-y-2">
-              {shifts.map((s) => <ShiftCard key={s.id} shift={s} peopleById={peopleById} canEdit={canEdit} onEdit={onEdit} onDelete={onDelete} />)}
-            </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -330,22 +334,26 @@ function MonthGrid({ anchor, byDate, onSelectDay }) {
   const weeks = Array.from({ length: 6 }, (_, w) => Array.from({ length: 7 }, (_, d) => addDays(gridStart, w * 7 + d)));
   return (
     <Card className="p-4">
-      <div className="grid grid-cols-7 text-xs font-medium text-muted mb-2">
-        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => <div key={d} className="px-2 py-1">{d}</div>)}
-      </div>
-      <div className="grid grid-cols-7 gap-1">
-        {weeks.flat().map((d) => {
-          const key = toISODate(d);
-          const count = (byDate[key] || []).length;
-          const inMonth = d.getMonth() === anchor.getMonth();
-          return (
-            <button key={key} onClick={() => onSelectDay(d)}
-              className={`text-left rounded-lg border border-line p-2 h-20 hover:border-ink/30 ${inMonth ? 'bg-white' : 'bg-surface text-muted'}`}>
-              <span className="text-xs">{d.getDate()}</span>
-              {count > 0 && <span className="block mt-1 text-[10px] font-medium text-signal-amber">{count} shift{count > 1 ? 's' : ''}</span>}
-            </button>
-          );
-        })}
+      <div className="overflow-x-auto">
+        <div className="min-w-[560px]">
+          <div className="grid grid-cols-7 text-xs font-medium text-muted mb-2">
+            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => <div key={d} className="px-2 py-1">{d}</div>)}
+          </div>
+          <div className="grid grid-cols-7 gap-1">
+            {weeks.flat().map((d) => {
+              const key = toISODate(d);
+              const count = (byDate[key] || []).length;
+              const inMonth = d.getMonth() === anchor.getMonth();
+              return (
+                <button key={key} onClick={() => onSelectDay(d)}
+                  className={`text-left rounded-lg border border-line p-2 h-20 hover:border-ink/30 ${inMonth ? 'bg-white' : 'bg-surface text-muted'}`}>
+                  <span className="text-xs">{d.getDate()}</span>
+                  {count > 0 && <span className="block mt-1 text-[10px] font-medium text-signal-amber">{count} shift{count > 1 ? 's' : ''}</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </Card>
   );

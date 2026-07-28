@@ -16,12 +16,12 @@ export function Card({ className = '', children, ...rest }) {
 
 export function PageHeader({ title, description, actions }) {
   return (
-    <div className="flex items-start justify-between gap-4 px-8 py-6 border-b border-line bg-card">
-      <div>
-        <h1 className="text-3xl font-bold text-ink">{title}</h1>
+    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 px-4 sm:px-8 py-6 border-b border-line bg-card">
+      <div className="min-w-0">
+        <h1 className="text-2xl sm:text-3xl font-bold text-ink">{title}</h1>
         {description && <p className="text-sm text-muted mt-0.5">{description}</p>}
       </div>
-      {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
+      {actions && <div className="flex flex-wrap items-center gap-2 sm:shrink-0">{actions}</div>}
     </div>
   );
 }
@@ -76,7 +76,13 @@ export const Select = forwardRef(function Select({ className = '', children, ...
   return (
     <select
       ref={ref}
-      className={`w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-signal-amber/40 focus:border-signal-amber ${className}`}
+      // `w-full` only applies when the caller passes no className at all — a
+      // caller-supplied `w-*` (e.g. "w-48") is a plain Tailwind width utility
+      // too, so appending it after `w-full` wouldn't reliably override it
+      // (CSS cascade order between two equal-specificity utility classes
+      // depends on generation order, not source order, so `w-full` was
+      // silently winning and stretching every custom-width Select to 100%).
+      className={`rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-signal-amber/40 focus:border-signal-amber ${className || 'w-full'}`}
       {...rest}
     >
       {children}

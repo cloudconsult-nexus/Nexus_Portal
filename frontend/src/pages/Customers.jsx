@@ -252,8 +252,8 @@ export default function Customers() {
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-ink truncate">{org.name}</span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-ink">{org.name}</span>
                     {org.account_number && (
                       <span className="text-xs text-muted font-mono bg-surface border border-line rounded px-1.5 py-0.5 shrink-0">{org.account_number}</span>
                     )}
