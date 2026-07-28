@@ -4,7 +4,7 @@ import { Download } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { exportTableToPdf } from '../lib/pdfExport.js';
-import { PageHeader, Card, Button, Field, Select, Input, LoadingBlock, EmptyState, ErrorBanner } from '../components/ui.jsx';
+import { PageHeader, Card, Button, Field, Select, Input, Table, Badge, LoadingBlock, EmptyState, ErrorBanner } from '../components/ui.jsx';
 import OrganizationSelector from '../components/OrganizationSelector.jsx';
 
 function toISODate(d) { return d.toISOString().slice(0, 10); }
@@ -19,6 +19,7 @@ export default function OnCallReports() {
 
   const [coverage, setCoverage] = useState(null);
   const [workload, setWorkload] = useState(null);
+  const [hierarchySummary, setHierarchySummary] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -34,12 +35,14 @@ export default function OnCallReports() {
     setLoading(true);
     setError('');
     try {
-      const [cov, work] = await Promise.all([
+      const [cov, work, hierarchy] = await Promise.all([
         api.get(`/reports/coverage?calendarId=${calendarId}&startDate=${startDate}&endDate=${endDate}`),
         api.get(`/reports/workload?organizationId=${organizationId}&startDate=${startDate}&endDate=${endDate}`),
+        api.get(`/reports/hierarchy-summary?organizationId=${organizationId}&startDate=${startDate}&endDate=${endDate}`),
       ]);
       setCoverage(cov);
       setWorkload(work.workload);
+      setHierarchySummary(hierarchy);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -56,6 +59,19 @@ export default function OnCallReports() {
       columns: ['Person', 'Shifts'],
       rows: (workload || []).map((w) => [w.name, w.shift_count]),
       filename: 'oncall-workload',
+    });
+  }
+
+  function exportHierarchyPdf() {
+    exportTableToPdf({
+      title: 'Customer Hierarchy Summary',
+      subtitle: `${startDate} to ${endDate}`,
+      columns: ['Customer', 'People', 'Calendars', 'Upcoming shifts', 'Coverage gaps', 'Missing chains'],
+      rows: (hierarchySummary?.rows || []).map((r) => [
+        r.isRoot ? `${r.organizationName} (parent)` : r.organizationName,
+        r.peopleCount, r.calendarCount, r.upcomingAssignments, r.coverageGaps, r.missingEscalationChains,
+      ]),
+      filename: 'customer-hierarchy-summary',
     });
   }
 
@@ -111,6 +127,38 @@ export default function OnCallReports() {
                 </ResponsiveContainer>
               )}
             </Card>
+
+            {hierarchySummary?.rows?.length > 1 && (
+              <Card className="p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-ink">Customer hierarchy summary</h3>
+                  <Button variant="secondary" size="sm" onClick={exportHierarchyPdf}><Download size={13} /> Export PDF</Button>
+                </div>
+                <Table columns={['Customer', 'People', 'Calendars', 'Upcoming shifts', 'Coverage gaps', 'Missing chains']}>
+                  {hierarchySummary.rows.map((r) => (
+                    <tr key={r.organizationId} className={r.isRoot ? 'bg-surface' : ''}>
+                      <td className="px-4 py-2.5 text-ink font-medium">
+                        {r.organizationName}
+                        {r.isRoot && <Badge tone="blue" className="ml-2">Parent</Badge>}
+                      </td>
+                      <td className="px-4 py-2.5 text-ink">{r.peopleCount}</td>
+                      <td className="px-4 py-2.5 text-ink">{r.calendarCount}</td>
+                      <td className="px-4 py-2.5 text-ink">{r.upcomingAssignments}</td>
+                      <td className="px-4 py-2.5 text-ink">{r.coverageGaps > 0 ? <Badge tone="red">{r.coverageGaps}</Badge> : r.coverageGaps}</td>
+                      <td className="px-4 py-2.5 text-ink">{r.missingEscalationChains > 0 ? <Badge tone="amber">{r.missingEscalationChains}</Badge> : r.missingEscalationChains}</td>
+                    </tr>
+                  ))}
+                  <tr className="font-semibold border-t-2 border-line">
+                    <td className="px-4 py-2.5 text-ink">Total</td>
+                    <td className="px-4 py-2.5 text-ink">{hierarchySummary.total.peopleCount}</td>
+                    <td className="px-4 py-2.5 text-ink">{hierarchySummary.total.calendarCount}</td>
+                    <td className="px-4 py-2.5 text-ink">{hierarchySummary.total.upcomingAssignments}</td>
+                    <td className="px-4 py-2.5 text-ink">{hierarchySummary.total.coverageGaps}</td>
+                    <td className="px-4 py-2.5 text-ink">{hierarchySummary.total.missingEscalationChains}</td>
+                  </tr>
+                </Table>
+              </Card>
+            )}
           </>
         )}
       </div>

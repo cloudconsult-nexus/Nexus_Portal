@@ -97,6 +97,85 @@ router.get('/workload', async (req, res) => {
   res.json({ workload: rows });
 });
 
+// Per-child breakdown for a parent Customer: one row per organization in
+// its subtree (itself + every descendant) with that org's OWN direct
+// numbers — not recursively rolled into each other — plus a `total` row
+// summing them, so a parent can be compared against its children rather
+// than only seeing one already-merged figure (that's what /workload and
+// /dashboard-summary already do).
+router.get('/hierarchy-summary', async (req, res) => {
+  const { organizationId, startDate, endDate } = z
+    .object({ organizationId: z.string().uuid(), startDate: z.string(), endDate: z.string() })
+    .parse(req.query);
+
+  const scopedIds = await resolveScopedOrgIds(req);
+  if (!(scopedIds === null || scopedIds.includes(organizationId))) {
+    return res.status(403).json({ error: 'Insufficient permissions' });
+  }
+  const subtreeIds = [organizationId, ...(await getDescendantIds(organizationId))];
+
+  const [orgRows, peopleRows, calendarRows, upcomingRows, gapRows, missingRows] = await Promise.all([
+    pool.query(`SELECT id, name, account_number FROM organizations WHERE id = ANY($1) AND is_deleted = false ORDER BY name`, [subtreeIds]),
+    pool.query(`SELECT organization_id, count(*) AS n FROM people WHERE organization_id = ANY($1) AND is_deleted = false GROUP BY organization_id`, [subtreeIds]),
+    pool.query(`SELECT organization_id, count(*) AS n FROM calendars WHERE organization_id = ANY($1) GROUP BY organization_id`, [subtreeIds]),
+    pool.query(
+      `SELECT c.organization_id, count(*) AS n FROM assignments a JOIN calendars c ON c.id = a.calendar_id
+       WHERE c.organization_id = ANY($1) AND a.date BETWEEN $2 AND $3
+       GROUP BY c.organization_id`,
+      [subtreeIds, startDate, endDate]
+    ),
+    pool.query(
+      `SELECT c.organization_id, count(*) AS n FROM assignments a JOIN calendars c ON c.id = a.calendar_id
+       WHERE c.organization_id = ANY($1) AND a.date BETWEEN $2 AND $3
+         AND a.mode = 'escalation' AND a.primary_person_id IS NULL
+       GROUP BY c.organization_id`,
+      [subtreeIds, startDate, endDate]
+    ),
+    pool.query(
+      `SELECT c.organization_id, count(*) AS n FROM assignments a JOIN calendars c ON c.id = a.calendar_id
+       WHERE c.organization_id = ANY($1) AND a.date BETWEEN $2 AND $3
+         AND a.mode = 'escalation' AND a.primary_person_id IS NOT NULL
+         AND a.secondary_person_id IS NULL AND a.default_person_id IS NULL
+       GROUP BY c.organization_id`,
+      [subtreeIds, startDate, endDate]
+    ),
+  ]);
+
+  const toCountMap = (rows) => new Map(rows.map((r) => [r.organization_id, Number(r.n)]));
+  const peopleMap = toCountMap(peopleRows.rows);
+  const calendarMap = toCountMap(calendarRows.rows);
+  const upcomingMap = toCountMap(upcomingRows.rows);
+  const gapMap = toCountMap(gapRows.rows);
+  const missingMap = toCountMap(missingRows.rows);
+
+  const rows = orgRows.rows
+    .map((o) => ({
+      organizationId: o.id,
+      organizationName: o.name,
+      accountNumber: o.account_number,
+      isRoot: o.id === organizationId,
+      peopleCount: peopleMap.get(o.id) || 0,
+      calendarCount: calendarMap.get(o.id) || 0,
+      upcomingAssignments: upcomingMap.get(o.id) || 0,
+      coverageGaps: gapMap.get(o.id) || 0,
+      missingEscalationChains: missingMap.get(o.id) || 0,
+    }))
+    .sort((a, b) => (a.isRoot === b.isRoot ? a.organizationName.localeCompare(b.organizationName) : a.isRoot ? -1 : 1));
+
+  const total = rows.reduce(
+    (acc, r) => ({
+      peopleCount: acc.peopleCount + r.peopleCount,
+      calendarCount: acc.calendarCount + r.calendarCount,
+      upcomingAssignments: acc.upcomingAssignments + r.upcomingAssignments,
+      coverageGaps: acc.coverageGaps + r.coverageGaps,
+      missingEscalationChains: acc.missingEscalationChains + r.missingEscalationChains,
+    }),
+    { peopleCount: 0, calendarCount: 0, upcomingAssignments: 0, coverageGaps: 0, missingEscalationChains: 0 }
+  );
+
+  res.json({ rows, total });
+});
+
 router.get('/mappings', async (req, res) => {
   const { rows } = await pool.query(
     `SELECT id, name, description, sort_order FROM report_mappings
