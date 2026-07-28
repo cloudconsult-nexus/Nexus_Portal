@@ -6,7 +6,7 @@ export const blocks = [
   para('OnCall Reports (admin-only) has three reports, all driven by the same Organization and date-range picker at the top of the page. Every report is scoped to what you\'re allowed to see — a Customer Admin only ever sees their own Customer and its nested descendants; a Global Admin can pick any Customer.'),
 
   heading('Coverage over time'),
-  para('How much of a single Calendar\'s scheduled time actually has a Primary person assigned, day by day, over the selected date range. Driven by the Calendar picker, not the Organization picker — pick the specific Calendar you want to check.'),
+  para('How much scheduled time actually has a Primary person assigned, day by day, over the selected date range. By default this rolls up every Calendar across the selected Organization\'s subtree — leave the Calendar picker on "All calendars (rolled up)" for a parent-organization view spanning multiple schedules, or pick one specific Calendar there to drill into just that schedule.'),
   table(['Field', 'Definition'], [
     ['Coverage %', 'Covered slots ÷ total slots across the whole range, as a whole-number percentage. Shown as "—" if there are no shifts in range at all.'],
     ['byDate', 'One point per date with at least one shift: how many of that day\'s shifts have a Primary person set (covered) versus the day\'s total shift count (total). The chart line is covered ÷ total for each date.'],

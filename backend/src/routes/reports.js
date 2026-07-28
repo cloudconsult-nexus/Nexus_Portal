@@ -49,22 +49,45 @@ router.get('/dashboard-summary', async (req, res) => {
 });
 
 router.get('/coverage', async (req, res) => {
-  const { calendarId, startDate, endDate } = z
-    .object({ calendarId: z.string().uuid(), startDate: z.string(), endDate: z.string() })
+  const { organizationId, calendarId, startDate, endDate } = z
+    .object({
+      organizationId: z.string().uuid(),
+      // Optional drill-down to one specific calendar — omitted (or the
+      // frontend's "All calendars" empty string) means roll up across every
+      // calendar in the organization's subtree instead of just one.
+      calendarId: z.preprocess((v) => (v === '' ? undefined : v), z.string().uuid().optional()),
+      startDate: z.string(),
+      endDate: z.string(),
+    })
     .parse(req.query);
 
-  const { rows: calRows } = await pool.query('SELECT organization_id FROM calendars WHERE id = $1', [calendarId]);
-  if (!calRows[0]) return res.status(404).json({ error: 'Calendar not found' });
   const scopedIds = await resolveScopedOrgIds(req);
-  if (!(scopedIds === null || scopedIds.includes(calRows[0].organization_id))) {
+  if (!(scopedIds === null || scopedIds.includes(organizationId))) {
     return res.status(403).json({ error: 'Insufficient permissions' });
+  }
+  const subtreeIds = [organizationId, ...(await getDescendantIds(organizationId))];
+
+  let calendarIds;
+  if (calendarId) {
+    const { rows: calRows } = await pool.query('SELECT organization_id FROM calendars WHERE id = $1', [calendarId]);
+    if (!calRows[0]) return res.status(404).json({ error: 'Calendar not found' });
+    if (!subtreeIds.includes(calRows[0].organization_id)) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+    calendarIds = [calendarId];
+  } else {
+    const { rows: calRows } = await pool.query('SELECT id FROM calendars WHERE organization_id = ANY($1)', [subtreeIds]);
+    calendarIds = calRows.map((r) => r.id);
+  }
+  if (calendarIds.length === 0) {
+    return res.json({ byDate: [], coveragePercent: null });
   }
 
   const { rows } = await pool.query(
     `SELECT date, count(*) FILTER (WHERE primary_person_id IS NOT NULL) AS covered, count(*) AS total
-     FROM assignments WHERE calendar_id = $1 AND date BETWEEN $2 AND $3
+     FROM assignments WHERE calendar_id = ANY($1) AND date BETWEEN $2 AND $3
      GROUP BY date ORDER BY date`,
-    [calendarId, startDate, endDate]
+    [calendarIds, startDate, endDate]
   );
   const totalSlots = rows.reduce((sum, r) => sum + Number(r.total), 0);
   const coveredSlots = rows.reduce((sum, r) => sum + Number(r.covered), 0);

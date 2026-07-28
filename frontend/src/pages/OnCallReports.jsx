@@ -12,6 +12,7 @@ function toISODate(d) { return d.toISOString().slice(0, 10); }
 export default function OnCallReports() {
   const { user } = useAuth();
   const [calendars, setCalendars] = useState([]);
+  // '' = roll up across every calendar in the selected organization's subtree
   const [calendarId, setCalendarId] = useState('');
   const [organizationId, setOrganizationId] = useState(user?.organizationId || null);
   const [startDate, setStartDate] = useState(toISODate(new Date(Date.now() - 30 * 86400000)));
@@ -24,19 +25,22 @@ export default function OnCallReports() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    api.get('/calendars').then((data) => {
+    if (!organizationId) { setCalendars([]); setCalendarId(''); return; }
+    api.get(`/calendars?organizationId=${organizationId}`).then((data) => {
       setCalendars(data.calendars);
-      if (!calendarId && data.calendars[0]) setCalendarId(data.calendars[0].id);
+      // Reset any calendar drill-down that doesn't belong to the newly
+      // selected organization's subtree back to the rolled-up view.
+      setCalendarId((prev) => (data.calendars.some((c) => c.id === prev) ? prev : ''));
     });
-  }, []);
+  }, [organizationId]);
 
   async function load() {
-    if (!calendarId || !organizationId) return;
+    if (!organizationId) return;
     setLoading(true);
     setError('');
     try {
       const [cov, work, hierarchy] = await Promise.all([
-        api.get(`/reports/coverage?calendarId=${calendarId}&startDate=${startDate}&endDate=${endDate}`),
+        api.get(`/reports/coverage?organizationId=${organizationId}${calendarId ? `&calendarId=${calendarId}` : ''}&startDate=${startDate}&endDate=${endDate}`),
         api.get(`/reports/workload?organizationId=${organizationId}&startDate=${startDate}&endDate=${endDate}`),
         api.get(`/reports/hierarchy-summary?organizationId=${organizationId}&startDate=${startDate}&endDate=${endDate}`),
       ]);
@@ -77,27 +81,33 @@ export default function OnCallReports() {
 
   return (
     <div>
-      <PageHeader title="OnCall Reports" description="Coverage and workload for the selected calendar and date range."
+      <PageHeader title="OnCall Reports" description="Coverage and workload for the selected organization and date range."
         actions={<Button variant="secondary" onClick={exportPdf} disabled={!workload?.length}><Download size={14} /> Export PDF</Button>} />
 
       <div className="p-8 space-y-6">
         <Card className="p-4 grid grid-cols-4 gap-4">
+          <Field label="Organization"><OrganizationSelector value={organizationId} onChange={setOrganizationId} /></Field>
           <Field label="Calendar">
-            <Select value={calendarId} onChange={(e) => setCalendarId(e.target.value)}>
+            <Select value={calendarId} onChange={(e) => setCalendarId(e.target.value)} disabled={!organizationId}>
+              <option value="">All calendars (rolled up)</option>
               {calendars.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>
           </Field>
-          <Field label="Organization"><OrganizationSelector value={organizationId} onChange={setOrganizationId} /></Field>
           <Field label="From"><Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></Field>
           <Field label="To"><Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} /></Field>
         </Card>
 
         {error && <ErrorBanner message={error} />}
-        {loading ? <LoadingBlock /> : !coverage ? <EmptyState title="Select a calendar and organization" /> : (
+        {loading ? <LoadingBlock /> : !coverage ? <EmptyState title="Select an organization" /> : (
           <>
             <Card className="p-5">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold text-ink">Coverage over time</h3>
+                <div>
+                  <h3 className="text-sm font-semibold text-ink">Coverage over time</h3>
+                  <p className="text-xs text-muted">
+                    {calendarId ? calendars.find((c) => c.id === calendarId)?.name || 'Selected calendar' : 'All calendars (rolled up by organization)'}
+                  </p>
+                </div>
                 <span className="text-sm font-mono text-ink">{coverage.coveragePercent == null ? '—' : `${coverage.coveragePercent}%`}</span>
               </div>
               {coverage.byDate.length === 0 ? <EmptyState title="No shifts in range" /> : (
