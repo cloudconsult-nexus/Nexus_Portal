@@ -26,6 +26,23 @@ async function scopeCalendarOrRespond(req, res, calendarId) {
   return rows[0].organization_id;
 }
 
+// Full scheduling reach: a person is only assignable to a calendar if it's
+// their primary organization, or one of their additionally-linked
+// organizations (person_organizations, routes/people.js). See
+// routes/assignments.js for the identical helper.
+async function findUnassignablePeople(personIds, calendarOrgId) {
+  const ids = [...new Set(personIds.filter(Boolean))];
+  if (ids.length === 0) return [];
+  const { rows } = await pool.query(
+    `SELECT p.id, p.name FROM people p
+     WHERE p.id = ANY($1)
+       AND p.organization_id IS DISTINCT FROM $2
+       AND NOT EXISTS (SELECT 1 FROM person_organizations po WHERE po.person_id = p.id AND po.organization_id = $2)`,
+    [ids, calendarOrgId]
+  );
+  return rows;
+}
+
 const generateSchema = z.object({
   calendarId: z.string().uuid(),
   startDate: z.string(),
@@ -65,7 +82,16 @@ router.post('/preview', requireScheduleAccess, async (req, res) => {
 
 router.post('/commit', requireScheduleAccess, async (req, res) => {
   const input = generateSchema.parse(req.body);
-  if (!(await scopeCalendarOrRespond(req, res, input.calendarId))) return;
+  const calendarOrgId = await scopeCalendarOrRespond(req, res, input.calendarId);
+  if (!calendarOrgId) return;
+
+  const unassignable = await findUnassignablePeople(input.personIds, calendarOrgId);
+  if (unassignable.length > 0) {
+    return res.status(400).json({
+      error: `Not assignable to this calendar's organization (add them to it under People first): ${unassignable.map((p) => p.name).join(', ')}`,
+    });
+  }
+
   const rotation = buildRotation(input);
 
   const created = [];

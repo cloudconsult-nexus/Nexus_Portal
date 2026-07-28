@@ -78,6 +78,24 @@ const createSchema = z.object({
   confirmConflicts: z.boolean().optional(),
 });
 
+// Full scheduling reach: a person is only assignable to a calendar if it's
+// their primary organization, or one of their additionally-linked
+// organizations (person_organizations, routes/people.js). Returns whichever
+// of the submitted people belong to neither, so the caller can reject with
+// a specific, actionable error instead of a silent mismatch.
+async function findUnassignablePeople(personIds, calendarOrgId) {
+  const ids = [...new Set(personIds.filter(Boolean))];
+  if (ids.length === 0) return [];
+  const { rows } = await pool.query(
+    `SELECT p.id, p.name FROM people p
+     WHERE p.id = ANY($1)
+       AND p.organization_id IS DISTINCT FROM $2
+       AND NOT EXISTS (SELECT 1 FROM person_organizations po WHERE po.person_id = p.id AND po.organization_id = $2)`,
+    [ids, calendarOrgId]
+  );
+  return rows;
+}
+
 // Checks every filled tier (primary/secondary/tertiary/default) for a given
 // shift window against the rest of the schedule, tagging each hit with which
 // tier it came from. A person can legitimately fill more than one tier (e.g.
@@ -105,7 +123,8 @@ async function findAllConflicts(tiers, date, startTime, endTime, excludeAssignme
 
 router.post('/', requireScheduleAccess, async (req, res) => {
   const input = createSchema.parse(req.body);
-  if (!(await scopeCalendarOrRespond(req, res, input.calendarId))) return;
+  const calendarOrgId = await scopeCalendarOrRespond(req, res, input.calendarId);
+  if (!calendarOrgId) return;
 
   const dates = [input.date];
   if (input.replicateMonths) {
@@ -126,6 +145,16 @@ router.post('/', requireScheduleAccess, async (req, res) => {
     tertiaryPersonId: input.tertiaryPersonId || null,
     defaultPersonId: input.defaultPersonId,
   };
+
+  const unassignable = await findUnassignablePeople(
+    [tiers.primaryPersonId, tiers.secondaryPersonId, tiers.tertiaryPersonId, tiers.defaultPersonId],
+    calendarOrgId
+  );
+  if (unassignable.length > 0) {
+    return res.status(400).json({
+      error: `Not assignable to this calendar's organization (add them to it under People first): ${unassignable.map((p) => p.name).join(', ')}`,
+    });
+  }
 
   // A resource CAN legitimately be scheduled across multiple calendars or
   // overlapping shifts — this never blocks creation. It only requires the
@@ -172,7 +201,8 @@ router.put('/:id', requireScheduleAccess, async (req, res) => {
   const { rows: existingRows } = await pool.query('SELECT * FROM assignments WHERE id = $1', [req.params.id]);
   const existing = existingRows[0];
   if (!existing) return res.status(404).json({ error: 'Not found' });
-  if (!(await scopeCalendarOrRespond(req, res, existing.calendar_id))) return;
+  const calendarOrgId = await scopeCalendarOrRespond(req, res, existing.calendar_id);
+  if (!calendarOrgId) return;
 
   if (new Date(existing.date) < startOfToday()) {
     return res.status(400).json({ error: 'Past assignments are read-only' });
@@ -210,6 +240,16 @@ router.put('/:id', requireScheduleAccess, async (req, res) => {
     .some((f) => req.body[f] !== undefined);
   let conflicts = [];
   if (tierFieldsChanged) {
+    const unassignable = await findUnassignablePeople(
+      [mergedTiers.primaryPersonId, mergedTiers.secondaryPersonId, mergedTiers.tertiaryPersonId, mergedTiers.defaultPersonId],
+      calendarOrgId
+    );
+    if (unassignable.length > 0) {
+      return res.status(400).json({
+        error: `Not assignable to this calendar's organization (add them to it under People first): ${unassignable.map((p) => p.name).join(', ')}`,
+      });
+    }
+
     conflicts = await findAllConflicts(mergedTiers, existing.date, existing.start_time, existing.end_time, existing.id);
     if (conflicts.length > 0 && !req.body.confirmConflicts) {
       return res.json({ requiresConfirmation: true, conflicts });

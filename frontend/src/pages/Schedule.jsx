@@ -61,12 +61,21 @@ export default function Schedule() {
         setCalendarId('');
       }
     });
-    api.get('/people').then((data) => setPeople(data.people));
   }, [viewOrgId]);
 
   useEffect(() => {
     if (calendarId) setSearchParams({ calendarId }, { replace: true });
   }, [calendarId]);
+
+  // Person picker is scoped to whoever's actually eligible for the selected
+  // calendar's organization — their primary org, or one of their
+  // additionally-linked orgs ("full scheduling reach," People page). Refetch
+  // whenever the selected calendar (or its known org) changes.
+  const selectedCalendarOrgId = calendars.find((c) => c.id === calendarId)?.organization_id;
+  useEffect(() => {
+    if (!selectedCalendarOrgId) { setPeople([]); return; }
+    api.get(`/people?assignableToOrganizationId=${selectedCalendarOrgId}`).then((data) => setPeople(data.people));
+  }, [selectedCalendarOrgId]);
 
   const { rangeStart, rangeEnd } = useMemo(() => {
     if (view === 'day') return { rangeStart: anchor, rangeEnd: anchor };

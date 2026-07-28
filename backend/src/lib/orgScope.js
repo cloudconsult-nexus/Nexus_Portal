@@ -16,6 +16,34 @@ export async function getDescendantIds(rootId) {
   return rows.map((r) => r.id);
 }
 
+// Walks parent_id upward from orgId to find its ultimate root ancestor —
+// same upward direction as organizations.js's cycle-prevention CTE, just
+// taking the terminal (parent_id IS NULL) row instead of testing membership.
+// An org with no parent is already its own root.
+export async function getTreeRootId(orgId) {
+  const { rows } = await pool.query(
+    `WITH RECURSIVE ancestors AS (
+       SELECT id, parent_id FROM organizations WHERE id = $1
+       UNION ALL
+       SELECT o.id, o.parent_id FROM organizations o JOIN ancestors a ON o.id = a.parent_id
+     )
+     SELECT id FROM ancestors WHERE parent_id IS NULL LIMIT 1`,
+    [orgId]
+  );
+  return rows[0]?.id ?? orgId;
+}
+
+// Every organization in the same nested hierarchy tree as orgId — its whole
+// family (root ancestor + every descendant of that root), not just orgId's
+// own descendants. Used to restrict which additional organizations a Person
+// can be linked to (routes/people.js's person_organizations endpoints): a
+// person based at a hospital can also cover its sister sites/clinics in the
+// same tree, but not an unrelated top-level Customer.
+export async function getHierarchyTreeIds(orgId) {
+  const rootId = await getTreeRootId(orgId);
+  return [rootId, ...(await getDescendantIds(rootId))];
+}
+
 // The single source of truth for "which organization ids can this request
 // see" — deliberately expands Customer Admin/User access from "their own
 // Customer only" to "their Customer + every descendant," per the client's

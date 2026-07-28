@@ -49,6 +49,14 @@ export default function People() {
   const [newPassword, setNewPassword] = useState('');
   const [passwordAction, setPasswordAction] = useState({ saving: false, message: '', error: '' });
 
+  // Edit-only: additional (non-primary) organizations this person can also
+  // be scheduled under — "full scheduling reach," restricted server-side to
+  // the same nested hierarchy tree as their primary organization.
+  const [orgLinks, setOrgLinks] = useState([]);
+  const [orgCandidates, setOrgCandidates] = useState([]);
+  const [addOrgId, setAddOrgId] = useState('');
+  const [orgLinkAction, setOrgLinkAction] = useState({ saving: false, error: '' });
+
   async function load() {
     setLoading(true);
     try {
@@ -88,7 +96,51 @@ export default function People() {
     setResettingPassword(false);
     setNewPassword('');
     setPasswordAction({ saving: false, message: '', error: '' });
+    setAddOrgId('');
+    setOrgLinkAction({ saving: false, error: '' });
+    setOrgLinks([]);
+    setOrgCandidates([]);
+    if (canEdit) {
+      const [linksData, candidatesData] = await Promise.all([
+        api.get(`/people/${full.id}/organizations`),
+        api.get(`/people/${full.id}/organizations/candidates`),
+      ]);
+      setOrgLinks(linksData.organizations);
+      setOrgCandidates(candidatesData.organizations);
+    }
     setModalOpen(true);
+  }
+
+  async function handleAddOrgLink() {
+    if (!addOrgId) return;
+    setOrgLinkAction({ saving: true, error: '' });
+    try {
+      const { organization } = await api.post(`/people/${editing.id}/organizations`, { targetOrganizationId: addOrgId });
+      setOrgLinks((prev) => [...prev, organization].sort((a, b) => a.name.localeCompare(b.name)));
+      setOrgCandidates((prev) => prev.filter((o) => o.id !== addOrgId));
+      setAddOrgId('');
+      setOrgLinkAction({ saving: false, error: '' });
+      await load();
+    } catch (err) {
+      setOrgLinkAction({ saving: false, error: err.message });
+    }
+  }
+
+  async function handleRemoveOrgLink(organizationId) {
+    setOrgLinkAction({ saving: true, error: '' });
+    try {
+      await api.del(`/people/${editing.id}/organizations/${organizationId}`);
+      const removed = orgLinks.find((l) => l.organization_id === organizationId);
+      setOrgLinks((prev) => prev.filter((l) => l.organization_id !== organizationId));
+      if (removed) {
+        setOrgCandidates((prev) => [...prev, { id: removed.organization_id, name: removed.name, account_number: removed.account_number }]
+          .sort((a, b) => a.name.localeCompare(b.name)));
+      }
+      setOrgLinkAction({ saving: false, error: '' });
+      await load();
+    } catch (err) {
+      setOrgLinkAction({ saving: false, error: err.message });
+    }
   }
 
   async function handleSave() {
@@ -189,6 +241,9 @@ export default function People() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <Badge tone={ROLE_BADGE_TONE[p.role]}>{ROLE_LABELS[p.role]}</Badge>
                   {p.is_active ? <Badge tone="green">Active</Badge> : <Badge tone="neutral">Inactive</Badge>}
+                  {p.additional_org_count > 0 && (
+                    <Badge tone="blue">+{p.additional_org_count} org{p.additional_org_count > 1 ? 's' : ''}</Badge>
+                  )}
                 </div>
 
                 {(p.job_title || p.department) && (
@@ -235,6 +290,42 @@ export default function People() {
           {form.role === 'user' && (
             <Checkbox label="Can edit the schedule" checked={form.canEditSchedule} onChange={(e) => setForm({ ...form, canEditSchedule: e.target.checked })} />
           )}
+
+          {editing && canEdit && (
+            <div className="rounded-lg border border-line p-3 space-y-2">
+              <span className="text-xs font-medium text-ink">Additional organizations</span>
+              <p className="text-xs text-muted -mt-1">
+                Also schedulable on calendars in these organizations, alongside their primary one. Limited to the same nested Customer hierarchy.
+              </p>
+              {orgLinks.length === 0 ? (
+                <p className="text-xs text-muted">None yet.</p>
+              ) : (
+                <ul className="space-y-1">
+                  {orgLinks.map((link) => (
+                    <li key={link.organization_id} className="flex items-center justify-between text-sm text-ink">
+                      <span>{link.name}{link.account_number ? ` (${link.account_number})` : ''}</span>
+                      <button type="button" onClick={() => handleRemoveOrgLink(link.organization_id)} className="p-1 rounded hover:bg-surface text-muted hover:text-signal-red">
+                        <Trash2 size={13} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {orgCandidates.length > 0 && (
+                <div className="flex items-end gap-2">
+                  <Field label="Add organization">
+                    <Select value={addOrgId} onChange={(e) => setAddOrgId(e.target.value)}>
+                      <option value="">Select…</option>
+                      {orgCandidates.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                    </Select>
+                  </Field>
+                  <Button type="button" size="sm" onClick={handleAddOrgLink} loading={orgLinkAction.saving} disabled={!addOrgId}>Add</Button>
+                </div>
+              )}
+              {orgLinkAction.error && <p className="text-xs text-signal-red">{orgLinkAction.error}</p>}
+            </div>
+          )}
+
           {!editing && form.email && (
             isGA ? (
               <div className="space-y-2">
