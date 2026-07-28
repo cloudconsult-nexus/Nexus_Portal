@@ -19,7 +19,7 @@ export const blocks = [
   heading('If you\'ve been granted schedule-edit authority'),
   para('A Customer Admin can grant an individual User the same schedule authority as an admin, without making them an admin:'),
   list([
-    'Create, edit, and delete Shifts, including weekly repetition and the Auto-schedule round-robin tool.',
+    'Create, edit, and delete Shifts, including weekly repetition and the Auto-schedule tool.',
     'Approve or reject Shift Swap requests once the target person has accepted.',
     'Run Bulk Imports for schedule assignments.',
   ]),
