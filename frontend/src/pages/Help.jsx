@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from 'react-router-dom';
-import { Rocket, ShieldCheck, Database, Code2 } from 'lucide-react';
+import { Rocket, ShieldCheck, Database, Code2, BarChart3 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { ROLE_LABELS } from '../lib/roles.js';
 import { PageHeader } from '../components/ui.jsx';
@@ -11,6 +11,7 @@ import * as RoleGlobalAdmin from './help/RoleGlobalAdmin.jsx';
 import * as RoleCustomerAdmin from './help/RoleCustomerAdmin.jsx';
 import * as RoleUser from './help/RoleUser.jsx';
 import * as DataDictionary from './help/DataDictionary.jsx';
+import * as Reporting from './help/Reporting.jsx';
 import * as ApiGuide from './help/ApiGuide.jsx';
 
 const ROLE_PAGES = [RoleGlobalAdmin, RoleCustomerAdmin, RoleUser];
@@ -21,6 +22,7 @@ const SECTIONS = {
   'role-customer-admin': { ...RoleCustomerAdmin, icon: ShieldCheck },
   'role-user': { ...RoleUser, icon: ShieldCheck },
   'data-dictionary': { ...DataDictionary, icon: Database },
+  'reporting': { ...Reporting, icon: BarChart3 },
   'api-guide': { ...ApiGuide, icon: Code2 },
 };
 
@@ -73,6 +75,8 @@ export default function Help() {
           <HelpSectionNavGroup title="Reference">
             <NavItem section="data-dictionary" icon={Database} label={DataDictionary.title}
               active={activeKey === 'data-dictionary'} onClick={() => navigate('/help/data-dictionary')} />
+            <NavItem section="reporting" icon={BarChart3} label={Reporting.title}
+              active={activeKey === 'reporting'} onClick={() => navigate('/help/reporting')} />
             <NavItem section="api-guide" icon={Code2} label={ApiGuide.title}
               active={activeKey === 'api-guide'} onClick={() => navigate('/help/api-guide')} />
           </HelpSectionNavGroup>

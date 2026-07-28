@@ -29,7 +29,7 @@ export const blocks = [
   list([
     'Creating, editing, or deleting Calendars, or Customer/TAS settings.',
     'Changing anyone\'s role.',
-    'Admin screens: Invitations, Bulk Import (organization/person/calendar), Audit Logs, Report Mappings.',
+    'Admin screens: Invitations, Bulk Import (organization/person/calendar), OnCall Reports, Audit Logs, Report Mappings.',
   ]),
 
   callout('Date and time are locked once a shift is created. To reschedule, delete the shift and create a new one — this keeps the audit trail unambiguous.', 'warning'),
