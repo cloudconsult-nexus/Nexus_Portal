@@ -505,29 +505,106 @@ function ShiftModal({ open, onClose, form, setForm, people, peopleById, editingS
   );
 }
 
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DAY_PRESETS = [
+  { label: 'All days', days: [0, 1, 2, 3, 4, 5, 6] },
+  { label: 'Weekdays (Mon–Fri)', days: [1, 2, 3, 4, 5] },
+  { label: 'After hours (Mon–Thu)', days: [1, 2, 3, 4] },
+  { label: 'Weekend (Sat–Sun)', days: [6, 0] },
+];
+
+let ruleIdCounter = 0;
+function makeRule(overrides = {}) {
+  return {
+    id: `rule-${++ruleIdCounter}`,
+    label: '',
+    daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+    startTime: '09:00',
+    endTime: '17:00',
+    rotationDays: 7,
+    personIds: [],
+    ...overrides,
+  };
+}
+
+// Rules are meant to partition the week (e.g. "after hours Mon-Thu" +
+// "weekends" as two separate pools) — a day claimed by more than one rule
+// would silently double-book that date, so this is checked client-side
+// before hitting the API's identical server-side check.
+function findDayOverlap(rules) {
+  const claimedBy = new Map();
+  for (let i = 0; i < rules.length; i++) {
+    for (const day of rules[i].daysOfWeek) {
+      if (claimedBy.has(day)) {
+        return `${DAY_LABELS[day]} is selected in more than one rule below — each day can only belong to one rule.`;
+      }
+      claimedBy.set(day, i);
+    }
+  }
+  return null;
+}
+
 function AutoScheduleModal({ open, onClose, calendarId, people, onCommitted }) {
   const [startDate, setStartDate] = useState(toISODate(new Date()));
   const [endDate, setEndDate] = useState(toISODate(addDays(new Date(), 27)));
-  const [startTime, setStartTime] = useState('09:00');
-  const [endTime, setEndTime] = useState('17:00');
-  const [rotationDays, setRotationDays] = useState(7);
-  const [personIds, setPersonIds] = useState([]);
+  const [rules, setRules] = useState(() => [makeRule()]);
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  function togglePerson(id) {
-    setPersonIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  function updateRule(id, patch) {
+    setRules((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
     setPreview(null);
   }
 
-  const payload = { calendarId, startDate, endDate, startTime, endTime, personIds, rotationDays: Number(rotationDays) };
+  function toggleDay(id, day) {
+    setRules((prev) => prev.map((r) => (r.id === id
+      ? { ...r, daysOfWeek: r.daysOfWeek.includes(day) ? r.daysOfWeek.filter((d) => d !== day) : [...r.daysOfWeek, day].sort() }
+      : r)));
+    setPreview(null);
+  }
+
+  function togglePerson(id, personId) {
+    setRules((prev) => prev.map((r) => (r.id === id
+      ? { ...r, personIds: r.personIds.includes(personId) ? r.personIds.filter((x) => x !== personId) : [...r.personIds, personId] }
+      : r)));
+    setPreview(null);
+  }
+
+  function addRule() {
+    setRules((prev) => [...prev, makeRule({ daysOfWeek: [], startTime: '17:00', endTime: '09:00' })]);
+    setPreview(null);
+  }
+
+  function removeRule(id) {
+    setRules((prev) => prev.filter((r) => r.id !== id));
+    setPreview(null);
+  }
+
+  const overlapError = findDayOverlap(rules);
+  const incomplete = rules.some((r) => r.daysOfWeek.length === 0 || r.personIds.length === 0);
+
+  function buildPayload() {
+    return {
+      calendarId,
+      startDate,
+      endDate,
+      rules: rules.map((r, i) => ({
+        label: r.label.trim() || `Rule ${i + 1}`,
+        daysOfWeek: r.daysOfWeek,
+        startTime: r.startTime,
+        endTime: r.endTime,
+        personIds: r.personIds,
+        rotationDays: Number(r.rotationDays),
+      })),
+    };
+  }
 
   async function handlePreview() {
     setLoading(true);
     setError('');
     try {
-      const data = await api.post('/auto-schedule/preview', payload);
+      const data = await api.post('/auto-schedule/preview', buildPayload());
       setPreview(data.preview);
     } catch (err) {
       setError(err.message);
@@ -540,7 +617,7 @@ function AutoScheduleModal({ open, onClose, calendarId, people, onCommitted }) {
     setLoading(true);
     setError('');
     try {
-      await api.post('/auto-schedule/commit', payload);
+      await api.post('/auto-schedule/commit', buildPayload());
       onCommitted();
     } catch (err) {
       setError(err.message);
@@ -550,12 +627,12 @@ function AutoScheduleModal({ open, onClose, calendarId, people, onCommitted }) {
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Auto-schedule (round robin)" size="lg"
+    <Modal open={open} onClose={onClose} title="Auto-schedule" size="lg"
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
           {!preview ? (
-            <Button onClick={handlePreview} loading={loading} disabled={personIds.length === 0}>Preview</Button>
+            <Button onClick={handlePreview} loading={loading} disabled={incomplete || !!overlapError}>Preview</Button>
           ) : (
             <Button onClick={handleCommit} loading={loading}>Commit {preview.length} shifts</Button>
           )}
@@ -563,32 +640,80 @@ function AutoScheduleModal({ open, onClose, calendarId, people, onCommitted }) {
       }>
       <div className="space-y-4">
         {error && <ErrorBanner message={error} />}
+        {overlapError && <ErrorBanner message={overlapError} />}
         <div className="grid grid-cols-2 gap-4">
           <Field label="Start date"><Input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setPreview(null); }} /></Field>
           <Field label="End date"><Input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setPreview(null); }} /></Field>
-          <Field label="Shift start"><Input type="time" value={startTime} onChange={(e) => { setStartTime(e.target.value); setPreview(null); }} /></Field>
-          <Field label="Shift end"><Input type="time" value={endTime} onChange={(e) => { setEndTime(e.target.value); setPreview(null); }} /></Field>
-          <Field label="Rotate every (days)"><Input type="number" min={1} value={rotationDays} onChange={(e) => { setRotationDays(e.target.value); setPreview(null); }} /></Field>
         </div>
-        <Field label="Rotation pool">
-          <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
-            {people.map((p) => (
-              <button key={p.id} type="button" onClick={() => togglePerson(p.id)}
-                className={`text-xs px-2.5 py-1 rounded-full border ${personIds.includes(p.id) ? 'bg-ink text-white border-ink' : 'border-line text-ink hover:bg-surface'}`}>
-                {p.name}
-              </button>
-            ))}
-          </div>
-        </Field>
+
+        <div className="space-y-3">
+          {rules.map((rule, i) => (
+            <div key={rule.id} className="border border-line rounded-lg p-3 space-y-3">
+              <div className="flex items-center gap-2">
+                <Input value={rule.label} onChange={(e) => updateRule(rule.id, { label: e.target.value })}
+                  placeholder={`Rule ${i + 1} (e.g. After hours Mon–Thu)`} className="text-sm" />
+                {rules.length > 1 && (
+                  <button type="button" onClick={() => removeRule(rule.id)} className="text-muted hover:text-signal-red shrink-0 p-1.5">
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+
+              <Field label="Days of week">
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {DAY_PRESETS.map((preset) => (
+                    <button key={preset.label} type="button"
+                      onClick={() => updateRule(rule.id, { daysOfWeek: [...preset.days] })}
+                      className="text-[11px] px-2 py-1 rounded-full border border-line text-muted hover:bg-surface hover:text-ink">
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-1.5">
+                  {DAY_LABELS.map((label, day) => (
+                    <button key={day} type="button" onClick={() => toggleDay(rule.id, day)}
+                      className={`w-9 h-9 rounded-full text-xs font-medium border ${
+                        rule.daysOfWeek.includes(day) ? 'bg-ink text-white border-ink' : 'border-line text-ink hover:bg-surface'
+                      }`}>
+                      {label[0]}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+
+              <div className="grid grid-cols-3 gap-3">
+                <Field label="Shift start"><Input type="time" value={rule.startTime} onChange={(e) => updateRule(rule.id, { startTime: e.target.value })} /></Field>
+                <Field label="Shift end"><Input type="time" value={rule.endTime} onChange={(e) => updateRule(rule.id, { endTime: e.target.value })} /></Field>
+                <Field label="Rotate every" hint="matching shifts">
+                  <Input type="number" min={1} value={rule.rotationDays} onChange={(e) => updateRule(rule.id, { rotationDays: e.target.value })} />
+                </Field>
+              </div>
+
+              <Field label="Rotation pool">
+                <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+                  {people.map((p) => (
+                    <button key={p.id} type="button" onClick={() => togglePerson(rule.id, p.id)}
+                      className={`text-xs px-2.5 py-1 rounded-full border ${rule.personIds.includes(p.id) ? 'bg-ink text-white border-ink' : 'border-line text-ink hover:bg-surface'}`}>
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+            </div>
+          ))}
+        </div>
+
+        <Button variant="secondary" size="sm" onClick={addRule}><Plus size={14} /> Add rule</Button>
 
         {preview && (
           <div className="border border-line rounded-lg max-h-48 overflow-y-auto">
             <table className="w-full text-xs">
-              <thead><tr className="border-b border-line text-left text-muted"><th className="px-3 py-1.5">Date</th><th className="px-3 py-1.5">Primary</th><th className="px-3 py-1.5">Secondary</th></tr></thead>
+              <thead><tr className="border-b border-line text-left text-muted"><th className="px-3 py-1.5">Date</th><th className="px-3 py-1.5">Rule</th><th className="px-3 py-1.5">Primary</th><th className="px-3 py-1.5">Secondary</th></tr></thead>
               <tbody className="divide-y divide-line">
-                {preview.map((slot) => (
-                  <tr key={slot.date}>
+                {preview.map((slot, i) => (
+                  <tr key={`${slot.date}-${i}`}>
                     <td className="px-3 py-1.5">{slot.date}</td>
+                    <td className="px-3 py-1.5 text-muted">{slot.ruleLabel}</td>
                     <td className="px-3 py-1.5">{people.find((p) => p.id === slot.primaryPersonId)?.name}</td>
                     <td className="px-3 py-1.5">{people.find((p) => p.id === slot.secondaryPersonId)?.name}</td>
                   </tr>
