@@ -8,10 +8,18 @@ import { resolveScopedOrgIds } from '../lib/orgScope.js';
 const router = Router();
 router.use(requireAuth, requireRole('customer_admin'));
 
+// The frontend's org selects use '' for "— None —"/"All" (a plain HTML
+// <select> has no null option value) — coerce that to null before it ever
+// reaches zod's .uuid() check, otherwise an unset filter throws instead of
+// validating as "not set".
+function emptyToNull(v) {
+  return v === '' ? null : v;
+}
+
 const querySchema = z.object({
   entityType: z.string().optional(),
   action: z.string().optional(),
-  organizationId: z.string().uuid().optional(),
+  organizationId: z.preprocess(emptyToNull, z.string().uuid().nullable().optional()),
   from: z.string().optional(),
   to: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),

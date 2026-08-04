@@ -110,10 +110,21 @@ router.post('/accept-invite', async (req, res) => {
   if (!invitation) return res.status(400).json({ error: 'Invalid or expired invitation' });
 
   const passwordHash = await bcrypt.hash(password, 12);
-  await pool.query(
-    `UPDATE people SET password_hash = $1, login_enabled = true, is_active = true, role = $2 WHERE id = $3`,
-    [passwordHash, invitation.role, invitation.person_id]
-  );
+  try {
+    await pool.query(
+      `UPDATE people SET password_hash = $1, login_enabled = true, is_active = true, role = $2 WHERE id = $3`,
+      [passwordHash, invitation.role, invitation.person_id]
+    );
+  } catch (err) {
+    // Another person already holds this email and is login_enabled — see
+    // migrations/017_email_unique_only_when_login_enabled.sql. Two pending
+    // invitees can share an email right up until one of them accepts;
+    // whoever accepts second needs a distinct email before they can.
+    if (err.code === '23505' && err.constraint === 'idx_people_email_unique') {
+      return res.status(409).json({ error: 'Another active account already uses this email. Contact your administrator to resolve this before completing signup.' });
+    }
+    throw err;
+  }
   await markAccepted(invitation.id);
 
   res.status(204).end();

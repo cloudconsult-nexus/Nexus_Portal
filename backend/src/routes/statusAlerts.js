@@ -7,10 +7,20 @@ import { auditContext } from '../middleware/audit.js';
 
 const router = Router();
 
+// The frontend's org selects use '' for "— None —"/"All" (a plain HTML
+// <select> has no null option value) — coerce that to null before it ever
+// reaches zod's .uuid() check, otherwise an unset filter throws instead of
+// validating as "not set".
+function emptyToNull(v) {
+  return v === '' ? null : v;
+}
+
 // Public — this is the banner display endpoint the frontend polls
 // unauthenticated (matches migrations/010's "cheap indexed lookup" intent).
 router.get('/active', async (req, res) => {
-  const { organizationId } = z.object({ organizationId: z.string().uuid().optional() }).parse(req.query);
+  const { organizationId } = z
+    .object({ organizationId: z.preprocess(emptyToNull, z.string().uuid().nullable().optional()) })
+    .parse(req.query);
   const { rows } = await pool.query(
     `SELECT id, message, alert_type FROM status_alerts
      WHERE is_currently_active = true AND (organization_id IS NULL OR organization_id = $1)`,
@@ -28,7 +38,7 @@ router.get('/', async (req, res) => {
 
 const upsertSchema = z.object({
   message: z.string().min(1).max(120),
-  organizationId: z.string().uuid().nullable().optional(),
+  organizationId: z.preprocess(emptyToNull, z.string().uuid().nullable().optional()),
   alertType: z.enum(['one_time', 'recurring']),
   startAt: z.string().optional(),
   endAt: z.string().optional(),
