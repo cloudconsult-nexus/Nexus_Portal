@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import path from 'path';
+import { ZodError } from 'zod';
 
 import authRoutes from './routes/auth.js';
 import organizationsRoutes from './routes/organizations.js';
@@ -73,8 +74,13 @@ app.use('/status-alerts', statusAlertsRoutes);
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 
 // Centralized error handler — catches anything thrown/rejected in a route
-// that wasn't already caught locally.
+// that wasn't already caught locally. Schema validation failures
+// (schema.parse() throwing on bad input) are the caller's fault, not ours —
+// surface them as a 400 with the field-level issues instead of a generic 500.
 app.use((err, req, res, next) => {
+  if (err instanceof ZodError) {
+    return res.status(400).json({ error: 'Invalid request', issues: err.issues });
+  }
   console.error(err);
   res.status(500).json({ error: 'Internal server error' });
 });

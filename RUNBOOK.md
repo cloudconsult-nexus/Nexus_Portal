@@ -144,14 +144,23 @@ resource, just Terraform-managed env vars (`infra/variables.tf`) and a
 Secret Manager entry (`infra/secrets.tf`, created only when `smtp_password`
 is non-empty) feeding Cloud Run. `test` is currently configured to send
 through a dedicated **Google Workspace mailbox**,
-`no-reply@cloudconsult.technology`, via Gmail's SMTP endpoint — chosen over
+`nexus@cloudconsult.technology`, via Gmail's SMTP endpoint — chosen over
 a third-party ESP (SendGrid/Mailgun) since cloudconsult.technology already
 has an active Workspace subscription, which sidesteps any separate
 domain-authentication (SPF/DKIM CNAME) setup entirely.
 
+Previously sent from `no-reply@cloudconsult.technology`, retired after that
+account started rejecting every App Password with `535 5.7.8
+BadCredentials` — six rotations in three days all failed the same way,
+pointing at something account-level (2-Step Verification disabled, or a
+Workspace admin policy blocking App Passwords) rather than a bad password.
+`nexus@cloudconsult.technology` is the replacement sender; if it starts
+throwing the same error, check 2-Step Verification status and App Password
+policy on that account/OU before rotating again.
+
 - `infra/envs/test.tfvars`: `smtp_host = "smtp.gmail.com"`, `smtp_port =
-  587`, `smtp_user = "no-reply@cloudconsult.technology"`, `smtp_from =
-  "no-reply@cloudconsult.technology"`.
+  587`, `smtp_user = "nexus@cloudconsult.technology"`, `smtp_from =
+  "nexus@cloudconsult.technology"`.
 - `smtp_password` is an **App Password** generated from that mailbox's own
   Google Account (myaccount.google.com/apppasswords — requires 2-Step
   Verification enabled on the account first), supplied only via
@@ -250,12 +259,15 @@ gsutil cp gs://oncall-pro-prod-branding-<project-id>/<path>#<generation> gs://on
   Cloud SQL instance).
 - **Email not sending**: check `SMTP_HOST` is actually set for this
   environment (`infra/envs/prod.tfvars` doesn't have it yet — see "Outbound
-  email (SendGrid)" below) — if unset, invites/resets are silently only
-  logged to Cloud Logging, never delivered. Search logs for
+  email (Google Workspace)" above) — if unset, invites/resets are silently
+  only logged to Cloud Logging, never delivered. Search logs for
   `[email:dev] would send to` to confirm this is what's happening. If
-  `SMTP_HOST` is set but mail still isn't arriving, check SendGrid's
-  Activity feed for bounces/blocks (often an unauthenticated sending
-  domain) before assuming it's an app bug.
+  `SMTP_HOST` is set but mail still isn't arriving, check the sending
+  mailbox's Google Account → Security → "Recent security activity" for
+  blocked sign-in attempts (often the App Password was revoked or 2-Step
+  Verification got turned off), and confirm Gmail's outbound sending limit
+  (~2,000 recipients/day per Workspace account) hasn't been hit, before
+  assuming it's an app bug.
 
 ## Scaling & cost knobs
 

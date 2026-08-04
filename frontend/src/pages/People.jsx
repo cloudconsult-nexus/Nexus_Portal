@@ -78,16 +78,23 @@ export default function People() {
     return matchesSearch && matchesRole;
   });
 
+  function closeModal() {
+    setModalOpen(false);
+    setError('');
+  }
+
   function openCreate() {
     setEditing(null);
     setForm(EMPTY_FORM);
     setActivationMethod('invite');
+    setError('');
     setModalOpen(true);
   }
 
   async function openEdit(person) {
     const { person: full } = await api.get(`/people/${person.id}`);
     setEditing(full);
+    setError('');
     setForm({
       name: full.name || '', organizationId: full.organization_id || '', email: full.email || '',
       primaryPhone: full.primary_phone || '', smsPhone: full.sms_phone || '', secondaryPhone: full.secondary_phone || '',
@@ -265,12 +272,17 @@ export default function People() {
         )}
       </div>
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Edit person' : 'Add person'} size="lg"
-        footer={<><Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button><Button onClick={handleSave} loading={saving}
-          disabled={!form.name || !form.organizationId || (!editing && isGA && activationMethod === 'password' && form.password.length < 8)}>
+      <Modal open={modalOpen} onClose={closeModal} title={editing ? 'Edit person' : 'Add person'} size="lg"
+        footer={<><Button variant="secondary" onClick={closeModal}>Cancel</Button><Button onClick={handleSave} loading={saving}
+          disabled={!form.name || (form.role !== 'global_admin' && !form.organizationId) || (!editing && isGA && activationMethod === 'password' && form.password.length < 8)}>
           {editing ? 'Save' : 'Create'}
         </Button></>}>
         <div className="space-y-4">
+          {/* Rendered here (not just the page-level banner below the modal) since
+              this banner would otherwise sit behind the modal's overlay while
+              editing — a save failure (e.g. a duplicate-email conflict) would
+              look like a silent no-op. */}
+          {error && <ErrorBanner message={error} />}
           {editing && (
             <Field label="Photo">
               <PhotoUpload personId={editing.id} photoUrl={editing.photo_url} onUploaded={(url) => setEditing({ ...editing, photo_url: url })} />
@@ -278,13 +290,22 @@ export default function People() {
           )}
           <div className="grid grid-cols-2 gap-4">
             <Field label="Name"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus /></Field>
-            <Field label="Organization">
-              <OrganizationSelector value={form.organizationId} onChange={(id) => setForm({ ...form, organizationId: id })} />
-            </Field>
+            {/* A Global Admin sits above every organization (see backend
+                createSchema's comment) — no selection needed, and none of
+                the org-scoped fields below apply to them either. */}
+            {form.role !== 'global_admin' && (
+              <Field label="Organization">
+                <OrganizationSelector value={form.organizationId} onChange={(id) => setForm({ ...form, organizationId: id })} />
+              </Field>
+            )}
             <Field label="Email"><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
             <Field label="Role">
-              <Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-                {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+              <Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value, organizationId: e.target.value === 'global_admin' ? '' : form.organizationId })}>
+                {/* Only a Global Admin can grant the Global Admin role (enforced
+                    server-side too) — shown regardless if the person being edited
+                    already holds it, so the field doesn't look broken/blank. */}
+                {(isGA || form.role === 'global_admin' ? ROLES : ROLES.filter((r) => r !== 'global_admin'))
+                  .map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
               </Select>
             </Field>
             <Field label="Primary phone"><Input value={form.primaryPhone} onChange={(e) => setForm({ ...form, primaryPhone: e.target.value })} /></Field>

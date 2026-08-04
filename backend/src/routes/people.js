@@ -21,6 +21,27 @@ async function withResolvedPhoto(person) {
   return { ...person, photo_url: await resolveAssetUrl(person.photo_url) };
 }
 
+// Email only has to be unique among people who can actually log in — see
+// migrations/017_email_unique_only_when_login_enabled.sql. Checked up front
+// so a conflict comes back as a clear 409 instead of a raw constraint-
+// violation 500; excludePersonId lets an update ignore its own row.
+async function findEmailConflict(email, excludePersonId = null) {
+  const { rows } = await pool.query(
+    `SELECT id, name FROM people
+     WHERE lower(email) = lower($1) AND is_deleted = false AND login_enabled = true
+       AND ($2::uuid IS NULL OR id != $2)`,
+    [email, excludePersonId]
+  );
+  return rows[0] || null;
+}
+
+// Backstop for the race between the check above and the write below (two
+// concurrent requests claiming the same email) — the unique index is the
+// real guarantee, this just keeps its violation from surfacing as a raw 500.
+function isEmailConflictError(err) {
+  return err.code === '23505' && err.constraint === 'idx_people_email_unique';
+}
+
 const PEOPLE_COLUMNS = `id, organization_id, name, email, primary_phone, sms_phone, secondary_phone,
        department, job_title, role, can_edit_schedule, is_active, photo_url, login_enabled,
        last_active_at,
@@ -71,8 +92,16 @@ router.get('/:id', async (req, res) => {
 
 const createSchema = z.object({
   name: z.string().min(1),
-  organizationId: z.string().uuid(),
-  email: z.string().email().optional(),
+  // A Global Admin sits above every organization (TAS-wide access, see
+  // lib/orgScope.js's resolveScopedOrgIds — it ignores the caller's own
+  // organization_id entirely), so they're the one role that doesn't need
+  // one. migrations/002_unify_people_rbac.sql already dropped the DB's NOT
+  // NULL constraint on people.organization_id for exactly this case.
+  organizationId: z.preprocess((v) => (v === '' ? undefined : v), z.string().uuid().optional()),
+  // Same empty-string-isn't-undefined trap as organizationId above — an
+  // admin leaving Email blank (e.g. a Global Admin with no email yet)
+  // otherwise fails .email()'s format check instead of just being absent.
+  email: z.preprocess((v) => (v === '' ? undefined : v), z.string().email().optional()),
   primaryPhone: z.string().optional(),
   smsPhone: z.string().optional(),
   secondaryPhone: z.string().optional(),
@@ -89,22 +118,46 @@ const createSchema = z.object({
 
 router.post('/', requireRole('customer_admin'), async (req, res) => {
   const input = createSchema.parse(req.body);
+  if (input.role !== 'global_admin' && !input.organizationId) {
+    return res.status(400).json({ error: 'Organization is required.' });
+  }
   const scopedIds = await resolveScopedOrgIds(req);
-  if (!scopeAllows(scopedIds, input.organizationId)) return res.status(403).json({ error: 'Insufficient permissions' });
+  if (input.organizationId && !scopeAllows(scopedIds, input.organizationId)) {
+    return res.status(403).json({ error: 'Insufficient permissions' });
+  }
   if (input.password && req.user.role !== 'global_admin') {
     return res.status(403).json({ error: 'Only Global Admins can set a password directly.' });
+  }
+  if (input.role === 'global_admin' && req.user.role !== 'global_admin') {
+    return res.status(403).json({ error: 'Only Global Admins can create other Global Admins.' });
+  }
+
+  // A directly-set password activates the account immediately (login_enabled
+  // = true below), so it has to clear the same email-uniqueness bar as any
+  // other active account. An invite-only person stays login_enabled = false
+  // until accepted (see routes/auth.js's /accept-invite), so no check is
+  // needed here for that path — see findEmailConflict's docstring.
+  if (input.email && input.password) {
+    const conflict = await findEmailConflict(input.email);
+    if (conflict) return res.status(409).json({ error: `That email is already in use by ${conflict.name}.` });
   }
 
   const passwordHash = input.password ? await bcrypt.hash(input.password, 12) : null;
 
-  const { rows } = await pool.query(
-    `INSERT INTO people (organization_id, name, email, primary_phone, sms_phone, secondary_phone, department, job_title, role, can_edit_schedule, password_hash, login_enabled)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
-    [input.organizationId, input.name, input.email || null, input.primaryPhone || null, input.smsPhone || null,
-     input.secondaryPhone || null, input.department || null, input.jobTitle || null, input.role, input.canEditSchedule,
-     passwordHash, !!input.password]
-  );
-  const person = rows[0];
+  let person;
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO people (organization_id, name, email, primary_phone, sms_phone, secondary_phone, department, job_title, role, can_edit_schedule, password_hash, login_enabled)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+      [input.organizationId || null, input.name, input.email || null, input.primaryPhone || null, input.smsPhone || null,
+       input.secondaryPhone || null, input.department || null, input.jobTitle || null, input.role, input.canEditSchedule,
+       passwordHash, !!input.password]
+    );
+    person = rows[0];
+  } catch (err) {
+    if (isEmailConflictError(err)) return res.status(409).json({ error: 'That email is already in use by another active user.' });
+    throw err;
+  }
 
   // A directly-set password already activates the account — skip the
   // invite entirely rather than sending a now-redundant one.
@@ -112,7 +165,7 @@ router.post('/', requireRole('customer_admin'), async (req, res) => {
   if (!input.password && input.sendInvite && input.email) {
     ({ emailDelivered } = await createInvitation({
       personId: person.id,
-      organizationId: input.organizationId,
+      organizationId: input.organizationId || null,
       email: input.email,
       name: input.name,
       role: input.role,
@@ -121,7 +174,7 @@ router.post('/', requireRole('customer_admin'), async (req, res) => {
   }
 
   await req.logAudit({
-    action: 'create', entityType: 'person', entityId: person.id, entityName: person.name, organizationId: input.organizationId,
+    action: 'create', entityType: 'person', entityId: person.id, entityName: person.name, organizationId: input.organizationId || null,
     newValues: { activationMethod: input.password ? 'admin_set_password' : (input.sendInvite ? 'email_invite' : 'none'), emailDelivered },
   });
   const { password_hash, mfa_secret, ...safe } = person;
@@ -149,6 +202,9 @@ router.put('/:id', requireRole('customer_admin'), async (req, res) => {
   // Role changes are audited distinctly (role_change) since they're a
   // privilege escalation/de-escalation, not a routine field edit.
   if (req.body.role !== undefined && req.body.role !== existing.role) {
+    if (req.body.role === 'global_admin' && req.user.role !== 'global_admin') {
+      return res.status(403).json({ error: 'Only Global Admins can create other Global Admins.' });
+    }
     updates.push(`role = $${i++}`);
     values.push(req.body.role);
   }
@@ -157,11 +213,26 @@ router.put('/:id', requireRole('customer_admin'), async (req, res) => {
     return res.json({ person: await withResolvedPhoto(safe) });
   }
 
+  // Only a login_enabled person can actually hit the login-by-email lookup
+  // (see findEmailConflict's docstring), so a still-pending person is free
+  // to share an email — only check when this update would leave them (or
+  // already has them) able to log in.
+  if (req.body.email && req.body.email.toLowerCase() !== (existing.email || '').toLowerCase() && existing.login_enabled) {
+    const conflict = await findEmailConflict(req.body.email, req.params.id);
+    if (conflict) return res.status(409).json({ error: `That email is already in use by ${conflict.name}.` });
+  }
+
   values.push(req.params.id);
-  const { rows } = await pool.query(
-    `UPDATE people SET ${updates.join(', ')}, updated_at = now() WHERE id = $${i} RETURNING *`,
-    values
-  );
+  let rows;
+  try {
+    ({ rows } = await pool.query(
+      `UPDATE people SET ${updates.join(', ')}, updated_at = now() WHERE id = $${i} RETURNING *`,
+      values
+    ));
+  } catch (err) {
+    if (isEmailConflictError(err)) return res.status(409).json({ error: 'That email is already in use by another active user.' });
+    throw err;
+  }
 
   if (req.body.role !== undefined && req.body.role !== existing.role) {
     await req.logAudit({

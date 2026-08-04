@@ -15,6 +15,14 @@ const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 router.use(requireAuth, auditContext);
 
+// The frontend's org selects use '' for "— None —"/"All" (a plain HTML
+// <select> has no null option value) — coerce that to null before it ever
+// reaches zod's .uuid() check, otherwise an unset filter throws instead of
+// validating as "not set".
+function emptyToNull(v) {
+  return v === '' ? null : v;
+}
+
 // Organization (Customer) imports create new Customer *records* — same
 // Global-Admin-only rule as POST /organizations (routes/organizations.js),
 // not just "admin tier." Person/calendar imports are structural
@@ -38,7 +46,7 @@ router.post('/validate', upload.single('file'), async (req, res) => {
   const { entityType, organizationId, action } = z
     .object({
       entityType: z.enum(['organization', 'person', 'calendar', 'assignment']),
-      organizationId: z.string().uuid().optional(),
+      organizationId: z.preprocess(emptyToNull, z.string().uuid().nullable().optional()),
       action: z.enum(['create', 'update', 'delete']).default('create'),
     })
     .parse(req.body);
