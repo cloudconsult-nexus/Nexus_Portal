@@ -35,7 +35,18 @@ const app = express();
 // to be readable cross-origin; cors() below is what actually restricts which
 // origins may do so.
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-app.use(cors({ origin: process.env.CORS_ORIGIN?.split(',') || '*' }));
+
+// .trim() each entry: CORS_ORIGIN is operator-entered (Cloud Run console/
+// deploy scripts), and cors() does exact string matching against Origin —
+// a single stray leading/trailing space or newline from a copy-paste is
+// invisible in the console but silently fails every preflight (no
+// Access-Control-Allow-Origin on the response, no error, just a browser-side
+// "Failed to fetch" with nothing useful server-side to point at).
+const allowedOrigins = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+app.use(cors({ origin: allowedOrigins.length ? allowedOrigins : '*' }));
 app.use(express.json({ limit: '2mb' }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
