@@ -28,7 +28,13 @@ import publicBrandingRoutes from './routes/publicBranding.js';
 // background status-alert scheduler.
 const app = express();
 
-app.use(helmet());
+// crossOriginResourcePolicy: helmet's default is 'same-origin', which blocks
+// the browser from consuming *any* cross-origin response — independent of
+// and stricter than the cors() policy below. api and web are deployed as
+// separate Cloud Run services (different origins), so every response needs
+// to be readable cross-origin; cors() below is what actually restricts which
+// origins may do so.
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors({ origin: process.env.CORS_ORIGIN?.split(',') || '*' }));
 app.use(express.json({ limit: '2mb' }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
@@ -41,12 +47,11 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.get('/_health', (req, res) => res.json({ status: 'ok' }));
 
 // Local-dev logo storage fallback (see lib/storage.js) — served across origins
-// since the web app runs on a different port than the API. helmet's default
-// same-origin Cross-Origin-Resource-Policy would otherwise block the <img>
-// load; production doesn't hit this route at all (real uploads go to GCS).
+// since the web app runs on a different port than the API. The global
+// crossOriginResourcePolicy override above covers this now; production
+// doesn't hit this route at all (real uploads go to GCS).
 app.use(
   '/uploads',
-  (req, res, next) => { res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'); next(); },
   express.static(path.join(process.cwd(), 'uploads'))
 );
 
