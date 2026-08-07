@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import path from 'path';
+import { ZodError } from 'zod';
 
 import authRoutes from './routes/auth.js';
 import organizationsRoutes from './routes/organizations.js';
@@ -91,6 +92,20 @@ app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 // Centralized error handler — catches anything thrown/rejected in a route
 // that wasn't already caught locally.
 app.use((err, req, res, next) => {
+  // Every route validates its input with `schema.parse(req.body)` (zod)
+  // rather than a try/catch of its own, relying on this handler to turn a
+  // thrown ZodError into a response. Without this branch, a malformed
+  // request (missing field, wrong type, wrong auth shape — e.g. a client
+  // sending HTTP Basic Auth to /auth/login instead of a JSON body) fell
+  // through to the generic 500 below, indistinguishable from an actual
+  // server fault. Not a real error, so it's also not console.error'd.
+  if (err instanceof ZodError) {
+    return res.status(400).json({
+      error: 'Invalid request',
+      details: err.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message })),
+    });
+  }
+
   console.error(err);
   res.status(500).json({ error: 'Internal server error' });
 });
