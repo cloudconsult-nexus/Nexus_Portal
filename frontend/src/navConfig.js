@@ -1,6 +1,6 @@
 import {
   LayoutGrid, LayoutDashboard, Building2, Users, Calendar, Grid3x3, MessageSquare, ShieldCheck,
-  ArrowLeftRight, BarChart3, Shield, Settings as SettingsIcon, Radio, Palette, MailPlus, UploadCloud, BookOpen, Building,
+  ArrowLeftRight, BarChart3, Shield, Settings as SettingsIcon, Radio, Palette, MailPlus, UploadCloud, BookOpen, Building, DatabaseBackup,
 } from 'lucide-react';
 import { isAdmin, isGlobalAdmin, canViewMessages } from './lib/roles.js';
 
@@ -31,6 +31,7 @@ export const bottomNav = [
   { to: '/branding', label: 'Branding', icon: Palette, adminOnly: true },
   { to: '/report-mappings', label: 'Report Mappings', icon: LayoutGrid, globalAdminOnly: true },
   { to: '/tas-settings', label: 'TAS Settings', icon: Building, globalAdminOnly: true },
+  { to: '/backups', label: 'Backups', icon: DatabaseBackup, globalAdminOnly: true },
   { to: '/help/getting-started', label: 'Help', icon: BookOpen },
   { to: '/settings', label: 'Settings', icon: SettingsIcon },
 ];

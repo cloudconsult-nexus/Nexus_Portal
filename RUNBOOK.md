@@ -201,6 +201,21 @@ if you need it to take effect immediately).
 Automated backups + point-in-time recovery are always on
 (`infra/cloudsql.tf`) — retention is 7 backups in test, 30 in prod.
 
+**In-app (preferred for a one-off manual backup or restore):** Global Admin
+→ Backups. "Create backup now" triggers an on-demand backup via the Cloud
+SQL Admin API (`backend/src/lib/cloudSql.js`, `routes/backups.js`).
+"Restore" on a completed backup clones the live instance to a **brand-new**
+instance at that backup's timestamp — it never touches the running
+database. The UI hands back the new instance's name; finish the cutover
+manually with the Terraform step below. This needs
+`roles/cloudsql.editor` granted to the API's service account
+(`infra/iam.tf`) — a real permissions increase over just `cloudsql.client`,
+worth knowing about if this environment has an unusually strict
+least-privilege bar.
+
+**CLI (same operations, or for anything the UI doesn't cover — e.g. exact
+point-in-time recovery to an arbitrary second, not just a backup boundary):**
+
 ```bash
 # List available backups:
 gcloud sql backups list --instance=oncall-pro-prod-pg
@@ -216,9 +231,10 @@ gcloud sql instances clone oncall-pro-prod-pg oncall-pro-prod-pg-restored \
   --point-in-time='2026-07-20T04:00:00Z'
 ```
 
-After a restore-to-new-instance, point the app at it deliberately (update
-`INSTANCE_CONNECTION_NAME`/`DB_NAME` via Terraform) rather than renaming
-instances — renaming Cloud SQL instances isn't supported in place.
+After a restore-to-new-instance (whether triggered in-app or via the CLI),
+point the app at it deliberately (update `INSTANCE_CONNECTION_NAME`/`DB_NAME`
+via Terraform) rather than renaming instances — renaming Cloud SQL instances
+isn't supported in place.
 
 GCS bucket contents (logos/photos) have versioning enabled
 (`infra/storage.tf`) — a deleted or overwritten object's prior version is

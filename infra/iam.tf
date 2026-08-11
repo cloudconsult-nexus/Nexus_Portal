@@ -10,6 +10,23 @@ resource "google_project_iam_member" "api_cloudsql_client" {
   member  = "serviceAccount:${google_service_account.api_runtime.email}"
 }
 
+# In-app backup/restore (backend/src/lib/cloudSql.js, routes/backups.js) —
+# needs the Cloud SQL Admin API, not just the client role above. Cloud SQL
+# has no resource-level IAM below the project, so this is necessarily
+# project-wide, not scoped to just this one instance.
+#
+# roles/cloudsql.editor (not .admin): can list/create backups and clone the
+# instance to a new one, but can't delete instances or change IAM policy —
+# matches the "restore always creates a new instance, never touches the
+# live one in place" design (see RUNBOOK.md). This is a real increase in
+# blast radius for the API service account vs. just roles/cloudsql.client —
+# review before applying if that's a concern for this environment.
+resource "google_project_iam_member" "api_cloudsql_editor" {
+  project = var.project_id
+  role    = "roles/cloudsql.editor"
+  member  = "serviceAccount:${google_service_account.api_runtime.email}"
+}
+
 # Scoped secret access — only the secrets this service actually needs, not
 # project-wide Secret Manager access. The three below are conditional
 # (secrets.tf's count guard) — no grant is created for one that doesn't exist.

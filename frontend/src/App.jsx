@@ -27,6 +27,7 @@ import Invitations from './pages/Invitations.jsx';
 import BulkImport from './pages/BulkImport.jsx';
 import ReportMappings from './pages/ReportMappings.jsx';
 import TasSettings from './pages/TasSettings.jsx';
+import Backups from './pages/Backups.jsx';
 import Help from './pages/Help.jsx';
 import { Settings as SettingsIcon, LogOut, Menu, X } from 'lucide-react';
 
@@ -147,6 +148,7 @@ export default function App() {
       <Route path="/branding" element={<Protected><BrandingPreview /></Protected>} />
       <Route path="/report-mappings" element={<Protected><ReportMappings /></Protected>} />
       <Route path="/tas-settings" element={<Protected><TasSettings /></Protected>} />
+      <Route path="/backups" element={<Protected><Backups /></Protected>} />
       <Route path="/help/:section" element={<Protected><Help /></Protected>} />
       <Route path="/help" element={<Navigate to="/help/getting-started" replace />} />
       <Route path="/settings" element={<Protected><Settings /></Protected>} />
