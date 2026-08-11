@@ -23,9 +23,16 @@ function parseConnectionName() {
 
 let sqladminClient = null;
 async function getClient() {
+  // On Cloud Run, ADC comes from the metadata server, which only ever
+  // issues tokens for the broad 'cloud-platform' scope for the attached
+  // service account — requesting a narrower scope like sqlservice.admin
+  // here fails at the auth layer ("client is not authorized to make this
+  // request") before the Cloud SQL API is ever called. IAM (see
+  // infra/iam.tf's api_cloudsql_editor grant) is what actually restricts
+  // what the token can do; the scope is just which token gets minted.
   sqladminClient ??= google.sqladmin({
     version: 'v1beta4',
-    auth: new google.auth.GoogleAuth({ scopes: ['https://www.googleapis.com/auth/sqlservice.admin'] }),
+    auth: new google.auth.GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] }),
   });
   return sqladminClient;
 }
