@@ -5,6 +5,7 @@ import { useBranding } from './context/BrandingContext.jsx';
 import { topNav, onCallProNav, bottomNav, filterNavItems } from './navConfig.js';
 import { ROLE_LABELS } from './lib/roles.js';
 import BrandedHeader from './components/BrandedHeader.jsx';
+import ThrioChatWidget from './components/ThrioChatWidget.jsx';
 import Login from './pages/Login.jsx';
 import AcceptInvite from './pages/AcceptInvite.jsx';
 import ForgotPassword from './pages/ForgotPassword.jsx';
@@ -61,6 +62,7 @@ function Shell({ children }) {
 
   return (
     <div className="min-h-screen flex bg-surface">
+      <ThrioChatWidget />
       {sidebarOpen && (
         <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={closeSidebar} />
       )}
