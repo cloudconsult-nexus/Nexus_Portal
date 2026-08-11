@@ -40,6 +40,19 @@ export default function ThrioChatWidget() {
     const script = document.createElement('script');
     script.type = 'module';
     script.src = SCRIPT_SRC;
+    // The vendor script only initializes inside its own
+    // `window.addEventListener('load', ...)` handler (confirmed by reading
+    // the actual source at SCRIPT_SRC) — but by the time this component
+    // mounts, well after the SPA's real page load, that event has already
+    // fired once and won't fire again, so the listener registers too late
+    // and silently never runs (no error, no log, no network call — it just
+    // never executes). Re-dispatching a synthetic 'load' event on window
+    // once our script has actually loaded triggers it manually. This is a
+    // page-wide event, so in principle it could also re-trigger some other
+    // unrelated 'load' listener elsewhere in the app — not a concern today
+    // (nothing else in this codebase listens for it), but worth knowing if
+    // that ever changes.
+    script.onload = () => window.dispatchEvent(new Event('load'));
     document.body.appendChild(script);
   }, []);
 
