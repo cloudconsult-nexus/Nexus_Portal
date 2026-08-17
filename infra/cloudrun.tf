@@ -115,6 +115,19 @@ resource "google_cloud_run_v2_service" "api" {
         }
       }
 
+      dynamic "env" {
+        for_each = var.ncc_api_key != "" ? [1] : []
+        content {
+          name = "NCC_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.ncc_api_key[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+
       # Optional integrations (routes/reportMappings.js, routes/customerMessages.js
       # both already handle these being entirely absent) — omitted from the
       # container spec rather than set blank, since the report SSO secret in

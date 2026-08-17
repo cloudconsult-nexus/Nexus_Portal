@@ -132,3 +132,11 @@ variable "transaction_log_retention_days" {
   type        = number
   default     = 7
 }
+
+# ── NCC integration (routes/nccOnCall.js) ──
+variable "ncc_api_key" {
+  description = "Shared secret NCC (Nextiva Contact Center) authenticates the inbound on-call lookup with. Pass via -var or TF_VAR_ncc_api_key; never commit this. Leave unset to skip Secret Manager entry entirely — the endpoint then 501s instead of accepting any request."
+  type        = string
+  sensitive   = true
+  default     = ""
+}

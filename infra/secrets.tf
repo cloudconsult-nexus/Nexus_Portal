@@ -72,3 +72,22 @@ resource "google_secret_manager_secret_version" "customer_messaging_sso_secret" 
   secret      = google_secret_manager_secret.customer_messaging_sso_secret[0].id
   secret_data = var.customer_messaging_sso_secret
 }
+
+# NCC's (Nextiva Contact Center) shared key for the inbound on-call lookup
+# (routes/nccOnCall.js, lib/nccAuth.js) — same optional-secret pattern as
+# smtp_password above. Leaving this unset means that route 501s instead of
+# ever accepting a request, rather than silently having no real auth.
+resource "google_secret_manager_secret" "ncc_api_key" {
+  count     = var.ncc_api_key != "" ? 1 : 0
+  secret_id = "${var.app_name}-ncc-api-key"
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.required]
+}
+
+resource "google_secret_manager_secret_version" "ncc_api_key" {
+  count       = var.ncc_api_key != "" ? 1 : 0
+  secret      = google_secret_manager_secret.ncc_api_key[0].id
+  secret_data = var.ncc_api_key
+}

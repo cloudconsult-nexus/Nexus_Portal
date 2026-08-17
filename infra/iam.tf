@@ -49,6 +49,13 @@ resource "google_secret_manager_secret_iam_member" "api_smtp_password" {
   member    = "serviceAccount:${google_service_account.api_runtime.email}"
 }
 
+resource "google_secret_manager_secret_iam_member" "api_ncc_api_key" {
+  count     = var.ncc_api_key != "" ? 1 : 0
+  secret_id = google_secret_manager_secret.ncc_api_key[0].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.api_runtime.email}"
+}
+
 resource "google_secret_manager_secret_iam_member" "api_report_sso_fallback_secret" {
   count     = var.report_sso_fallback_secret != "" ? 1 : 0
   secret_id = google_secret_manager_secret.report_sso_fallback_secret[0].secret_id

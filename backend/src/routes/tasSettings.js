@@ -41,7 +41,7 @@ router.get('/', async (req, res) => {
 const FIELDS = [
   'name', 'phone', 'email', 'website', 'address', 'primary_contact', 'call_messages_url',
   'logo_url', 'primary_color', 'accent_color', 'name_override', 'tagline', 'favicon_url',
-  'description', 'message_html',
+  'description', 'message_html', 'timezone',
 ];
 
 router.put('/', requireRole('global_admin'), async (req, res) => {

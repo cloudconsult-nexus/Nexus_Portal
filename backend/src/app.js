@@ -23,6 +23,7 @@ import reportMappingsRoutes from './routes/reportMappings.js';
 import customerMessagesRoutes from './routes/customerMessages.js';
 import statusAlertsRoutes from './routes/statusAlerts.js';
 import backupsRoutes from './routes/backups.js';
+import nccOnCallRoutes from './routes/nccOnCall.js';
 import publicBrandingRoutes from './routes/publicBranding.js';
 
 // Express app construction, split out from index.js so tests can
@@ -87,6 +88,9 @@ app.use('/imports', importsRoutes);
 app.use('/report-mappings', reportMappingsRoutes);
 app.use('/customer-messages', customerMessagesRoutes);
 app.use('/status-alerts', statusAlertsRoutes);
+// Own prefix, not '/organizations' — see routes/nccOnCall.js's header
+// comment for why sharing that prefix with organizationsRoutes doesn't work.
+app.use('/ncc', nccOnCallRoutes);
 app.use('/backups', backupsRoutes);
 
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));

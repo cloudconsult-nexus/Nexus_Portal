@@ -6,6 +6,7 @@ import LogoUpload from '../components/LogoUpload.jsx';
 const FIELDS = [
   'name', 'phone', 'email', 'website', 'address', 'primary_contact', 'call_messages_url',
   'name_override', 'tagline', 'primary_color', 'accent_color', 'description', 'message_html',
+  'timezone',
 ];
 
 // TAS-wide instance settings (Global Admin only) — the singleton config
@@ -75,6 +76,9 @@ export default function TasSettings() {
               </div>
               <Field label="Address"><Input value={form.address || ''} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
               <Field label="Call messages URL"><Input value={form.call_messages_url || ''} onChange={(e) => setForm({ ...form, call_messages_url: e.target.value })} /></Field>
+              <Field label="Timezone" hint="IANA name (e.g. America/New_York) — the single timezone this whole instance's schedules are entered in. Used to resolve on-call lookups (e.g. from NCC) against a real timestamp.">
+                <Input value={form.timezone || ''} onChange={(e) => setForm({ ...form, timezone: e.target.value })} placeholder="America/New_York" />
+              </Field>
             </Card>
 
             <Card className="p-5 space-y-4">
