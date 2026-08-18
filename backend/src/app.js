@@ -23,6 +23,7 @@ import reportMappingsRoutes from './routes/reportMappings.js';
 import customerMessagesRoutes from './routes/customerMessages.js';
 import statusAlertsRoutes from './routes/statusAlerts.js';
 import publicBrandingRoutes from './routes/publicBranding.js';
+import onCallRoutes from './routes/onCall.js';
 
 // Express app construction, split out from index.js so tests can
 // supertest() it directly without binding a port or starting the
@@ -71,6 +72,16 @@ app.use(
 app.use('/public-branding', publicBrandingRoutes);
 
 app.use('/auth', authRoutes);
+// Mounted BEFORE organizationsRoutes, same '/organizations' prefix: it's a
+// separate router, service-API-key-gated (NCC), not human-JWT-gated — see
+// routes/onCall.js. organizationsRoutes' own top-level `router.use(requireAuth,
+// ...)` is unconditional (no path filter), so it intercepts every request
+// under '/organizations/*' before Express even checks that router's own
+// route patterns — mounting onCallRoutes second would never be reached.
+// onCallRoutes only claims the exact '/:orgId/on-call' GET route and falls
+// through (next()) for everything else, so organizationsRoutes still
+// handles all of its own paths normally.
+app.use('/organizations', onCallRoutes);
 app.use('/organizations', organizationsRoutes);
 app.use('/tas-settings', tasSettingsRoutes);
 app.use('/people', peopleRoutes);

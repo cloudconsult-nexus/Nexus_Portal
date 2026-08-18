@@ -15,13 +15,16 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 *
 router.use(requireAuth, auditContext);
 
 // photo_url is signed fresh on every read (see lib/storage.js) — the
-// bucket itself has no public-read grant.
-async function withResolvedPhoto(person) {
+// bucket itself has no public-read grant. Exported for reuse by
+// routes/onCall.js, which reuses this exact response shape (plus an added
+// on_call_role tag) per CLAUDE.md's instruction to match Patrick's expected
+// people-payload format rather than invent a new one.
+export async function withResolvedPhoto(person) {
   if (!person) return person;
   return { ...person, photo_url: await resolveAssetUrl(person.photo_url) };
 }
 
-const PEOPLE_COLUMNS = `id, organization_id, name, email, primary_phone, sms_phone, secondary_phone,
+export const PEOPLE_COLUMNS = `id, organization_id, name, email, primary_phone, sms_phone, secondary_phone,
        department, job_title, role, can_edit_schedule, is_active, photo_url, login_enabled,
        last_active_at,
        (SELECT COUNT(*) FROM person_organizations po WHERE po.person_id = people.id)::int AS additional_org_count`;
