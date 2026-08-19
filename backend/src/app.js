@@ -78,9 +78,12 @@ app.use('/auth', authRoutes);
 // ...)` is unconditional (no path filter), so it intercepts every request
 // under '/organizations/*' before Express even checks that router's own
 // route patterns — mounting onCallRoutes second would never be reached.
-// onCallRoutes only claims the exact '/:orgId/on-call' GET route and falls
-// through (next()) for everything else, so organizationsRoutes still
-// handles all of its own paths normally.
+// onCallRoutes only claims the exact '/:orgId/on-call' GET route, and
+// requireApiKey is attached to that one route handler (not via
+// `router.use()` inside onCall.js) — a bare `router.use()` there would run
+// for every request reaching this router before path matching happens,
+// which would 500 all of '/organizations/*' whenever NCC_API_KEY isn't
+// configured (this happened in test on 2026-08-19; see routes/onCall.js).
 app.use('/organizations', onCallRoutes);
 app.use('/organizations', organizationsRoutes);
 app.use('/tas-settings', tasSettingsRoutes);

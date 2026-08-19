@@ -195,3 +195,30 @@ describe('GET /organizations/:orgId/on-call', () => {
     expect(res.status).toBe(400);
   });
 });
+
+// Regression for the 2026-08-19 incident: onCall.js and organizations.js
+// (routes/organizations.js) are two separate routers both mounted at the
+// '/organizations' prefix (app.js). requireApiKey used to be attached via
+// `router.use(requireApiKey)` in onCall.js, which — because it's mounted
+// first — ran for every request under '/organizations/*' before Express
+// tried matching a specific route, not just for '/:orgId/on-call'. That
+// swallowed GET /organizations (list customers) and every other
+// organizations route behind NCC's service-API-key check, 500ing with
+// "Service authentication is not configured" whenever NCC_API_KEY wasn't
+// set — which looked exactly like "all customers were deleted" in the UI
+// (Customers.jsx fell through to its empty state on any fetch error). No
+// data was ever touched. Fix: requireApiKey is now attached only to the
+// '/:orgId/on-call' route itself.
+describe('onCall router does not shadow sibling /organizations/* routes', () => {
+  it('GET /organizations reaches organizationsRoutes’ human auth, not onCall’s service-key auth', async () => {
+    const res = await request(app).get('/organizations');
+    // organizationsRoutes' requireAuth rejects a missing Bearer token this
+    // way. If onCall's router.use(requireApiKey) were shadowing this route
+    // again, the response would instead be a 401 "Missing or invalid API
+    // key" (or, with NCC_API_KEY unset, a 500 "Service authentication is
+    // not configured") — neither of which is what a human client's login
+    // flow expects to see from the Customers list.
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe('Missing or invalid Authorization header');
+  });
+});

@@ -14,8 +14,20 @@ import { PEOPLE_COLUMNS, withResolvedPhoto } from './people.js';
 // same '/organizations' prefix as routes/organizations.js (app.js) — no
 // existing route conflicts, since Express only matches '/:id' against a
 // single path segment and this is '/:id/on-call'.
+//
+// requireApiKey is applied directly on the one route below, NOT via
+// `router.use(requireApiKey)` — this router shares the '/organizations'
+// prefix with organizationsRoutes (app.js mounts both), and a bare
+// `router.use()` middleware runs for every request that reaches this
+// router regardless of which path it eventually matches, before Express
+// even tries organizationsRoutes. With no NCC_API_KEY configured (true of
+// every environment until Phase 5.4 secrets are provisioned — see
+// .env.example), that took down GET/POST/PUT/DELETE /organizations/* —
+// the entire Customers page — with a 500 "Service authentication is not
+// configured", which is indistinguishable in the UI from "no customers
+// exist". No data was ever touched; this is purely a routing bug.
+// (Incident: 2026-08-19, see CLAUDE.md/RUNBOOK.md postmortem note.)
 const router = Router();
-router.use(requireApiKey);
 
 const paramsSchema = z.object({ orgId: z.string().uuid() });
 const querySchema = z.object({ at: z.string().datetime({ offset: true }) });
@@ -32,7 +44,7 @@ const querySchema = z.object({ at: z.string().datetime({ offset: true }) });
 // (PEOPLE_COLUMNS + withResolvedPhoto) plus the added on_call_role field,
 // per CLAUDE.md's instruction to match the format already in use rather
 // than invent a new one.
-router.get('/:orgId/on-call', async (req, res) => {
+router.get('/:orgId/on-call', requireApiKey, async (req, res) => {
   const { orgId } = paramsSchema.parse(req.params);
   const { at } = querySchema.parse(req.query);
 
