@@ -14,6 +14,7 @@ export const blocks = [
     ['parent_id', 'Optional — nests this Customer under another for display and roll-up reporting. A Customer can\'t be nested under its own descendant (checked on save).'],
     ['account_number, phone, email, address, website', 'Contact details'],
     ['contact_edit_requires_approval', 'Whether a User\'s contact-edit requests need Customer Admin approval, or apply directly'],
+    ['timezone', 'IANA timezone (e.g. America/Chicago), defaults to UTC. Used to resolve the NCC on-call lookup\'s UTC instant against this Customer\'s local shift windows. Settable via the API (PUT /organizations/:id) — not yet exposed in the Customers page UI.'],
     ['logo_url, favicon_url, primary_color, accent_color, name_override, tagline, description, message_html', 'Branding — falls back to TAS Settings for any field left unset'],
   ]),
 
@@ -32,6 +33,7 @@ export const blocks = [
   heading('Calendar & Assignment'),
   table(['Field', 'Notes'], [
     ['calendars.coverage_type', '24x7, business_hours, after_hours, or custom'],
+    ['calendars.default_person_id', 'A standing, slot-independent fallback contact for this calendar — distinct from an individual shift\'s own default. Used by the NCC on-call lookup when no shift at all covers the requested instant, so the response is never empty for a calendar that has one set. Settable via the API (PUT /calendars/:id) — not yet exposed in the Calendars page UI.'],
     ['assignments.mode', 'escalation (Primary → Secondary → Tertiary → Default in order) or broadcast (the same four tiers offered simultaneously — first to accept wins)'],
     ['assignments.primary_person_id, default_person_id', 'The only mandatory tiers — may be the same person'],
     ['assignments.secondary_person_id, tertiary_person_id', 'Optional, for either mode'],

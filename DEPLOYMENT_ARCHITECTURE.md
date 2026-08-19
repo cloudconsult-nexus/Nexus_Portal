@@ -28,8 +28,16 @@ procedures (rollback, secret rotation, restore), see [RUNBOOK.md](RUNBOOK.md).
                    │ (external) │  │  bucket (storage.tf)     │  versioned
                    └────────────┘  └─────────────────────────┘
 
+  NCC (Nextiva  ──▶  Cloud Run: api  (GET /organizations/:orgId/on-call,
+  Contact Center)                    X-API-Key auth — inbound, not outbound
+                                      like everything else on this page)
+
   Secret Manager ──▶ DB password, JWT secret, SMTP password, optional
                       integration secrets (mounted as env vars, secrets.tf/iam.tf)
+                      — NCC_API_KEY is NOT yet among these; it's a manual
+                      env var on the api service until infra/secrets.tf is
+                      extended for it (see RUNBOOK.md's Secret rotation
+                      section)
 
   Cloud Monitoring ──▶ uptime checks (API /_health, web /) + 5xx-rate alert
                         → email notification channel (monitoring.tf)
@@ -54,6 +62,7 @@ Both Cloud Run services scale to zero by default in test
 | 5 | Logging and monitoring | Cloud Logging: automatic. Monitoring: `infra/monitoring.tf` (uptime checks + alert policies + email notification channel) |
 | 6 | Backup strategy | Cloud SQL automated backups + PITR, explicit retention (`infra/cloudsql.tf`); GCS bucket versioning + 30-day noncurrent-version expiry (`infra/storage.tf`) |
 | 7 | Secret management | `infra/secrets.tf` + `infra/iam.tf` — `DB_PASSWORD`/`JWT_SECRET` always; `SMTP_PASS`/`REPORT_SSO_FALLBACK_SECRET`/`CUSTOMER_MESSAGING_SSO_SECRET` conditionally, only when set |
+| 8 | NCC on-call lookup (Phase 5.4) | `backend/src/routes/onCall.js`, `middleware/serviceAuth.js` (`X-API-Key`, env var `NCC_API_KEY` — not yet in `infra/secrets.tf`, see RUNBOOK.md), `lib/calendarService.js#getOnCallAt`. Inbound-only: NCC calls this app mid-call, this app never calls NCC — the reverse of every other external integration on this page. |
 
 ## Environments
 

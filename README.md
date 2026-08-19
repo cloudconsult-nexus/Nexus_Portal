@@ -1,15 +1,18 @@
-# OnCall Pro
+# OnCall Pro / Nexus Portal
 
-A from-scratch implementation of the on-call scheduling system described in
-the *OnCall Pro Administrator Guide*, plus everything needed to deploy it to
-Google Cloud Platform.
+An on-call scheduling system, originally built from the *OnCall Pro
+Administrator Guide* spec and now evolving into the **TAS Client Portal** —
+a white-labeled portal for Telephone Answering Service organizations
+integrating with Nextiva Contact Center (NCC). See `CLAUDE.md` for the full
+domain model and roadmap; short version below.
 
 Deploys to `test` automatically via Cloud Build on every push to `main`.
 
 ## What this is
 
-- **`backend/`** — Node.js/Express REST API. JWT auth, org-hierarchy-scoped
-  RBAC (Global Admin / Org Admin / Regular User), PostgreSQL via `pg`.
+- **`backend/`** — Node.js/Express REST API. JWT auth for the human-facing
+  app, plus a separate service-API-key auth for NCC's inbound on-call lookup
+  (see "NCC integration" below). PostgreSQL via `pg`.
 - **`frontend/`** — React + Vite + Tailwind single-page app.
 - **`infra/`** — Terraform for Cloud SQL, Artifact Registry, Secret Manager,
   IAM, monitoring/alerting, and two Cloud Run services (`api`, `web`), with
@@ -25,9 +28,16 @@ Postgres instance in the process of building this (login → org hierarchy →
 people → calendar → escalation assignment → conflict detection → shift swap
 two-stage approval → audit log → reports):
 
-- Auth (JWT), invite-and-activate user flow, password reset
-- Org hierarchy (Master → Main → Sub → Provider) with Global-Admin-only
-  mutation, Org-Admin subtree scoping, Regular-User read-only scoping
+- Auth (JWT), invite-and-activate user flow, password reset, TOTP MFA
+- A flat TAS-instance → Customer model (one deployed Portal = one TAS,
+  every Customer a standalone tenant), with optional non-hierarchical
+  Customer nesting (`parent_id`) for display/reporting grouping — not the
+  old fixed 5-level hierarchy this section used to describe. Three role
+  tiers (Global Admin / Customer Admin / User); a Customer Admin/User's
+  access is their own Customer plus every descendant in that optional
+  nesting (`resolveScopedOrgIds`), not just a single row. See
+  `ROLE_MATRIX.md` for the full permission table and `CLAUDE.md`'s "Domain
+  model" section for how this got here.
 - People (on-call contacts) CRUD + bulk upload endpoint
 - Calendars CRUD
 - Assignments: multi-day creation, escalation vs. broadcast mode, conflict
@@ -40,6 +50,27 @@ two-stage approval → audit log → reports):
 - Reports: dashboard summary, coverage %, workload distribution
 - The signature UI element — an escalation-chain visualization with a live
   pulse indicator — plus a full dashboard/schedule/reports frontend
+
+## NCC integration (on-call lookup)
+
+Phase 5.4 of the TAS Client Portal spec: Nextiva Contact Center (NCC) calls
+`GET /organizations/:orgId/on-call?at=<timestamp>` mid-call to resolve who
+to dispatch to — the inverse of a typical integration, since NCC calls
+*into* this app rather than the other way around. Authenticated with a
+static per-instance API key (`X-API-Key` / `NCC_API_KEY`), not the human
+JWT. Covered by an 11-test suite (`backend/tests/onCall.test.js`). Full
+contract in `frontend/src/pages/help/ApiGuide.jsx` (in-app Help → API
+Guide) for anyone working in this codebase, and in
+[`docs/on-call-api.md`](docs/on-call-api.md) as a standalone spec for the
+NCC-side integrator to implement against without reading our source. See
+`RUNBOOK.md` for the 2026-08-19 incident this shipped with (fixed same day,
+no data lost).
+
+**Two things this depends on aren't yet reachable from the UI** — a
+Customer's `timezone` and a Calendar's standing `default_person_id` — both
+settable only via the API right now. See `ROLE_MATRIX.md`/Data Dictionary
+help page for the fields, and `RUNBOOK.md`/`DEPLOYMENT_GUIDE.md` for
+`NCC_API_KEY`, which also isn't Terraform-managed yet.
 
 **Intentionally stubbed** (flagged in code, not silently faked):
 - **Notifications** (SMS/Slack on assignment) — the schema and toggle

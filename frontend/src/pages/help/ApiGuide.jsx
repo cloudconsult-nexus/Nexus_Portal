@@ -65,6 +65,7 @@ export const blocks = [
   ]),
   code('GET /organizations/:orgId/on-call?at=2026-08-18T14:00:00Z\nX-API-Key: <key>\n\n200 { "onCall": [ { ...same shape as /people, "on_call_role": "primary" }, ... ] }'),
   para('Returns 400 for a malformed orgId or missing/invalid at, 404 for a well-formed but nonexistent Customer, and 200 { onCall: [] } (not an error) for a Customer with no calendars.'),
+  para('A standalone version of this section — written for an integrator outside this codebase, with full example payloads — lives at docs/on-call-api.md in the repo.'),
 
   heading('Conventions'),
   table(['Convention', 'Detail'], [

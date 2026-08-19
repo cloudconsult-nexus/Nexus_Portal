@@ -196,6 +196,22 @@ password; Cloud Run picks up the new secret version on next deploy/revision
 (re-run `deploy.sh` or `gcloud run services update` to force a new revision
 if you need it to take effect immediately).
 
+**`NCC_API_KEY` (Phase 5.4, NCC on-call lookup) is not yet wired through
+Terraform/Secret Manager** — unlike the secrets above, it isn't in
+`infra/secrets.tf`, so it has to be set by hand on each environment's `api`
+Cloud Run service until that's added:
+
+```bash
+gcloud run services update oncall-pro-<env>-api --region us-central1 \
+  --update-env-vars NCC_API_KEY="$(openssl rand -base64 32)"
+```
+
+Give NCC the same value out of band. There's no rotation-without-downtime
+story for this yet either — updating it invalidates NCC's existing key
+immediately, same caveat as `JWT_SECRET` above but with no grace window.
+This gap is why `NCC_API_KEY` came up unset in `test` on 2026-08-19 — see
+the incident entry under "Incident response" below.
+
 ## Database backup & restore
 
 Automated backups + point-in-time recovery are always on
@@ -256,6 +272,44 @@ gsutil cp gs://oncall-pro-prod-branding-<project-id>/<path>#<generation> gs://on
   `SMTP_HOST` is set but mail still isn't arriving, check SendGrid's
   Activity feed for bounces/blocks (often an unauthenticated sending
   domain) before assuming it's an app bug.
+- **"Service authentication is not configured" (500) anywhere under
+  `/organizations`, not just `/organizations/:orgId/on-call`**: `NCC_API_KEY`
+  is unset on that environment's `api` service — see the "Secret rotation"
+  section above for how to set it. If this is instead scoped to *only* the
+  NCC on-call route and the rest of `/organizations/*` behaves normally,
+  that's the correct, working fail-closed behavior (see
+  `middleware/serviceAuth.js`), not a bug.
+
+### Incident: 2026-08-19 — `/organizations/*` briefly returned 500 in test
+
+**Symptom**: the Customers page showed "No customers yet" plus a
+"Service authentication is not configured" banner. Looked like every
+Customer had been deleted; none had.
+
+**Root cause**: `routes/onCall.js` (added same day, Phase 5.4) and
+`routes/organizations.js` are two separate Express routers both mounted at
+the `/organizations` prefix (`app.js`). `onCall.js` applied its service-API-
+key check via `router.use(requireApiKey)` instead of on its one route
+directly — since that router is mounted first, the unscoped middleware ran
+for *every* request under `/organizations/*`, not just its own
+`/:orgId/on-call` route. With `NCC_API_KEY` unset (true in every
+environment — that secret isn't Terraform-managed yet, see above), every
+organizations request 500'd before ever reaching `organizations.js`.
+Compounded by the frontend: `Customers.jsx` didn't distinguish "the fetch
+failed" from "the result was empty," so the error fell through to the
+"No customers yet" empty state.
+
+**Fix**: `requireApiKey` now attaches directly to the `/:orgId/on-call`
+route handler, not via `router.use()`; `Customers.jsx` no longer shows the
+empty-list state on a fetch error. See PR #7. No data was lost — confirmed
+by the fix landing and the Customers page repopulating immediately, with
+no restore performed.
+
+**Takeaway for future routes sharing a URL prefix with another router**:
+never attach auth middleware via a prefix-less `router.use()` on a router
+that shares its mount prefix with a sibling router — scope it to the
+specific route(s) that need it instead. `backend/tests/onCall.test.js` has
+a regression test for this exact case.
 
 ## Scaling & cost knobs
 
