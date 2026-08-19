@@ -8,6 +8,7 @@ import { auditContext } from '../middleware/audit.js';
 import { getEffectiveBranding } from '../lib/branding.js';
 import { assetKey, uploadAsset, resolveAssetUrl } from '../lib/storage.js';
 import { resolveScopedOrgIds } from '../lib/orgScope.js';
+import { isValidTimeZone } from '../lib/calendarService.js';
 
 // Customers (flat — no more hierarchy levels/parent nesting; see
 // migrations/013_tas_customer_model.sql). Kept on the `organizations`
@@ -99,11 +100,19 @@ router.put('/:id', requireRole('global_admin'), async (req, res) => {
     if (cycleRows[0]) return res.status(400).json({ error: 'A Customer cannot be its own ancestor' });
   }
 
+  // Validated up front (unlike the other fields in the generic loop below)
+  // because an invalid value here doesn't just save wrong — it throws at
+  // query time in lib/calendarService.js#getOnCallAt (NCC's on-call lookup)
+  // the next time anyone queries this Customer's on-call status.
+  if (req.body.timezone !== undefined && !isValidTimeZone(req.body.timezone)) {
+    return res.status(400).json({ error: 'Invalid timezone' });
+  }
+
   const fields = [
     'name', 'account_number', 'phone', 'email', 'address', 'website', 'primary_contact',
     'call_messages_url', 'logo_url', 'primary_color', 'accent_color', 'name_override',
     'tagline', 'favicon_url', 'description', 'message_html', 'contact_edit_requires_approval',
-    'parent_id',
+    'parent_id', 'timezone',
   ];
   const updates = [];
   const values = [];
