@@ -215,7 +215,7 @@ export default function Customers() {
           )}
         </div>
 
-        {loading ? <LoadingBlock /> : orgs.length === 0 ? (
+        {loading ? <LoadingBlock /> : error ? null : orgs.length === 0 ? (
           <EmptyState title="No customers yet" description={canManage ? 'Create your first Customer to get started.' : undefined} />
         ) : tree.length === 0 ? (
           <EmptyState title="No customers match your search" />
