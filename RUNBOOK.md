@@ -189,6 +189,12 @@ export TF_VAR_jwt_secret=$(openssl rand -base64 48)
 cd infra && terraform apply -var-file=envs/prod.tfvars
 
 # Rotate SMTP password similarly via TF_VAR_smtp_password.
+
+# Rotate NCC_API_KEY (Phase 5.4, NCC on-call lookup) — invalidates NCC's
+# existing key immediately, same caveat as JWT_SECRET above but with no
+# grace window; coordinate the cutover with NCC first:
+export TF_VAR_ncc_api_key=$(openssl rand -base64 32)
+cd infra && terraform apply -var-file=envs/prod.tfvars
 ```
 
 Terraform only rotates the Secret Manager value + the Cloud SQL user
@@ -196,21 +202,18 @@ password; Cloud Run picks up the new secret version on next deploy/revision
 (re-run `deploy.sh` or `gcloud run services update` to force a new revision
 if you need it to take effect immediately).
 
-**`NCC_API_KEY` (Phase 5.4, NCC on-call lookup) is not yet wired through
-Terraform/Secret Manager** — unlike the secrets above, it isn't in
-`infra/secrets.tf`, so it has to be set by hand on each environment's `api`
-Cloud Run service until that's added:
-
-```bash
-gcloud run services update oncall-pro-<env>-api --region us-central1 \
-  --update-env-vars NCC_API_KEY="$(openssl rand -base64 32)"
-```
-
-Give NCC the same value out of band. There's no rotation-without-downtime
-story for this yet either — updating it invalidates NCC's existing key
-immediately, same caveat as `JWT_SECRET` above but with no grace window.
-This gap is why `NCC_API_KEY` came up unset in `test` on 2026-08-19 — see
-the incident entry under "Incident response" below.
+Give NCC its key out of band — there's no API of its own to fetch it
+through. Leaving `TF_VAR_ncc_api_key` unset entirely skips the Secret
+Manager entry, and the endpoint fails closed with 500 rather than allowing
+an unauthenticated caller through (see "Incident response" below for what
+this looked like before it was scoped to just its own route, rather than
+what an unset key alone does). `NCC_API_KEY` was a manually-set Cloud Run
+env var, not a Terraform-managed secret, until 2026-08-19 — if you're on
+an environment provisioned before then, its first `terraform apply` after
+upgrading creates a fresh Secret Manager entry from whatever value you pass
+as `TF_VAR_ncc_api_key`, distinct from whatever was set by hand previously;
+reuse that old value as the `TF_VAR_ncc_api_key` you apply with so the two
+don't diverge and silently break NCC's existing key.
 
 ## Database backup & restore
 

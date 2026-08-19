@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import pool from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
+import { requireRole } from '../middleware/rbac.js';
 import { auditContext } from '../middleware/audit.js';
 import { getDashboardAlerts } from '../lib/calendarService.js';
 import { buildEmbedUrl } from '../lib/embedSso.js';
@@ -9,6 +10,15 @@ import { resolveScopedOrgIds, getDescendantIds } from '../lib/orgScope.js';
 
 const router = Router();
 router.use(requireAuth, auditContext);
+
+// /dashboard-summary and /mappings* deliberately stay open to every
+// authenticated role below (Dashboard is a for-everyone page, and
+// /mappings* is already self-gated per-mapping via visible_to_roles — see
+// each route). /coverage, /workload, and /hierarchy-summary back the
+// OnCall Reports page specifically, whose nav item is Customer-Admin-and-
+// above only (frontend/src/navConfig.js's `adminOnly`) — until 2026-08-19
+// nothing enforced that server-side, so a User with a valid token could
+// call these directly. ROLE_MATRIX.md documented this gap; this closes it.
 
 router.get('/dashboard-summary', async (req, res) => {
   const { organizationId } = z.object({ organizationId: z.string().uuid() }).parse(req.query);
@@ -48,7 +58,7 @@ router.get('/dashboard-summary', async (req, res) => {
   });
 });
 
-router.get('/coverage', async (req, res) => {
+router.get('/coverage', requireRole('customer_admin'), async (req, res) => {
   const { organizationId, calendarId, startDate, endDate } = z
     .object({
       organizationId: z.string().uuid(),
@@ -98,7 +108,7 @@ router.get('/coverage', async (req, res) => {
   });
 });
 
-router.get('/workload', async (req, res) => {
+router.get('/workload', requireRole('customer_admin'), async (req, res) => {
   const { organizationId, startDate, endDate } = z
     .object({ organizationId: z.string().uuid(), startDate: z.string(), endDate: z.string() })
     .parse(req.query);
@@ -126,7 +136,7 @@ router.get('/workload', async (req, res) => {
 // summing them, so a parent can be compared against its children rather
 // than only seeing one already-merged figure (that's what /workload and
 // /dashboard-summary already do).
-router.get('/hierarchy-summary', async (req, res) => {
+router.get('/hierarchy-summary', requireRole('customer_admin'), async (req, res) => {
   const { organizationId, startDate, endDate } = z
     .object({ organizationId: z.string().uuid(), startDate: z.string(), endDate: z.string() })
     .parse(req.query);

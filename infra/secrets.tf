@@ -72,3 +72,18 @@ resource "google_secret_manager_secret_version" "customer_messaging_sso_secret" 
   secret      = google_secret_manager_secret.customer_messaging_sso_secret[0].id
   secret_data = var.customer_messaging_sso_secret
 }
+
+resource "google_secret_manager_secret" "ncc_api_key" {
+  count     = var.ncc_api_key != "" ? 1 : 0
+  secret_id = "${var.app_name}-ncc-api-key"
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.required]
+}
+
+resource "google_secret_manager_secret_version" "ncc_api_key" {
+  count       = var.ncc_api_key != "" ? 1 : 0
+  secret      = google_secret_manager_secret.ncc_api_key[0].id
+  secret_data = var.ncc_api_key
+}

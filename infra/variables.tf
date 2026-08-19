@@ -114,6 +114,12 @@ variable "customer_messaging_token_param" {
   type    = string
   default = "token"
 }
+variable "ncc_api_key" {
+  description = "Static per-instance API key NCC (Nextiva Contact Center) authenticates the on-call lookup endpoint with (Phase 5.4, middleware/serviceAuth.js). Pass via -var or TF_VAR_ncc_api_key; never commit this. Leave unset to skip the Secret Manager entry entirely — the endpoint then fails closed with 500 rather than allowing unauthenticated access (see RUNBOOK.md's 2026-08-19 incident for what that looks like when it shadows sibling routes instead of just its own)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
 
 # ── Monitoring ──
 variable "alert_notification_email" {

@@ -159,6 +159,25 @@ resource "google_cloud_run_v2_service" "api" {
         }
       }
 
+      # NCC (Nextiva Contact Center) on-call lookup service auth
+      # (Phase 5.4, middleware/serviceAuth.js) — left unset, the endpoint
+      # fails closed with 500 rather than allowing an unauthenticated
+      # caller through. Unlike the report/messaging integrations above,
+      # this one is security-critical, not merely feature-gating, so it's
+      # a secret_key_ref even though it isn't required at apply time.
+      dynamic "env" {
+        for_each = var.ncc_api_key != "" ? [1] : []
+        content {
+          name = "NCC_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.ncc_api_key[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+
       resources {
         limits = {
           cpu    = "1"

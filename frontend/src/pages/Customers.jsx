@@ -11,8 +11,18 @@ import {
 import LogoUpload from '../components/LogoUpload.jsx';
 import OrganizationSelector from '../components/OrganizationSelector.jsx';
 
-const DETAIL_FIELDS = ['name', 'account_number', 'phone', 'email', 'address', 'website', 'primary_contact', 'call_messages_url'];
+const DETAIL_FIELDS = ['name', 'account_number', 'phone', 'email', 'address', 'website', 'primary_contact', 'call_messages_url', 'timezone'];
 const BRANDING_FIELDS = ['name_override', 'tagline', 'primary_color', 'accent_color', 'description', 'message_html'];
+
+// Same check the API validates against (lib/calendarService.js#isValidTimeZone)
+// — the on-call lookup resolves NCC's UTC instant into whichever of these a
+// Customer has set, so this list has to actually match what the backend
+// will accept, not a hand-picked subset. Falls back to a short common list
+// if the runtime doesn't support Intl.supportedValuesOf (older engines).
+const TIMEZONES = (() => {
+  try { return Intl.supportedValuesOf('timeZone'); }
+  catch { return ['UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles']; }
+})();
 
 // Read-only display for a saved record — the modal defaults to this and
 // only switches to editable fields while editMode is on.
@@ -321,6 +331,11 @@ export default function Customers() {
                   </div>
                   <Field label="Address"><Input value={form.address || ''} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
                   <Field label="Call messages URL"><Input value={form.call_messages_url || ''} onChange={(e) => setForm({ ...form, call_messages_url: e.target.value })} /></Field>
+                  <Field label="Timezone" hint="Used to resolve the NCC on-call lookup's UTC instant against this Customer's local shift windows.">
+                    <Select value={form.timezone || 'UTC'} onChange={(e) => setForm({ ...form, timezone: e.target.value })}>
+                      {TIMEZONES.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
+                    </Select>
+                  </Field>
                   <Field label="Parent customer" hint="Optional — nests this Customer under another for display grouping.">
                     <Select value={form.parent_id || ''} onChange={(e) => setForm({ ...form, parent_id: e.target.value || null })}>
                       <option value="">None (top-level)</option>
@@ -346,6 +361,7 @@ export default function Customers() {
                   </div>
                   <ReadOnlyField label="Address" value={detail.address} />
                   <ReadOnlyField label="Call messages URL" value={detail.call_messages_url} />
+                  <ReadOnlyField label="Timezone" value={detail.timezone} />
                   <ReadOnlyField label="Parent customer" value={detail.parent_id ? findOrg(orgs, detail.parent_id)?.name : null} />
                   <ReadOnlyField label="Contact edits require approval" value={detail.contact_edit_requires_approval ? 'Yes' : 'No'} />
                 </>

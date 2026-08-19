@@ -8,7 +8,7 @@ import { PageHeader, Card, Button, Input, Field, Select, Table, Modal, ConfirmDi
 import OrganizationSelector from '../components/OrganizationSelector.jsx';
 
 const COVERAGE_LABELS = { '24x7': '24×7', business_hours: 'Business hours', after_hours: 'After hours', custom: 'Custom' };
-const EMPTY_FORM = { name: '', organizationId: '', description: '', coverageType: '24x7' };
+const EMPTY_FORM = { name: '', organizationId: '', description: '', coverageType: '24x7', defaultPersonId: '' };
 
 export default function Calendars() {
   const { user } = useAuth();
@@ -23,6 +23,7 @@ export default function Calendars() {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [viewOrgId, setViewOrgId] = useState(null);
+  const [assignablePeople, setAssignablePeople] = useState([]);
 
   async function load() {
     setLoading(true);
@@ -38,6 +39,16 @@ export default function Calendars() {
 
   useEffect(() => { load(); }, [viewOrgId]);
 
+  // Same "who's eligible for this Customer" pool the shift-creation picker
+  // (Schedule.jsx) draws from — primary or additionally-linked, regardless
+  // of the caller's own scope. Refetched whenever the modal's Organization
+  // changes so the Default contact list (and any already-selected value
+  // that's no longer valid for a newly-picked org) stays in sync with it.
+  useEffect(() => {
+    if (!modalOpen || !form.organizationId) { setAssignablePeople([]); return; }
+    api.get(`/people?assignableToOrganizationId=${form.organizationId}`).then((data) => setAssignablePeople(data.people));
+  }, [modalOpen, form.organizationId]);
+
   function openCreate() {
     setEditing(null);
     setForm({ ...EMPTY_FORM, organizationId: user?.organizationId || '' });
@@ -46,7 +57,10 @@ export default function Calendars() {
 
   function openEdit(cal) {
     setEditing(cal);
-    setForm({ name: cal.name, organizationId: cal.organization_id, description: cal.description || '', coverageType: cal.coverage_type });
+    setForm({
+      name: cal.name, organizationId: cal.organization_id, description: cal.description || '',
+      coverageType: cal.coverage_type, defaultPersonId: cal.default_person_id || '',
+    });
     setModalOpen(true);
   }
 
@@ -54,10 +68,16 @@ export default function Calendars() {
     setSaving(true);
     setError('');
     try {
+      // '' means "no default contact" in the Select below, but the API's
+      // create schema validates defaultPersonId as a UUID when present
+      // (z.string().uuid().nullable().optional()) — an empty string fails
+      // that, unlike PUT, which special-cases '' itself. Normalize to null
+      // here so create and edit behave the same from this one form.
+      const payload = { ...form, defaultPersonId: form.defaultPersonId || null };
       if (editing) {
-        await api.put(`/calendars/${editing.id}`, form);
+        await api.put(`/calendars/${editing.id}`, payload);
       } else {
-        await api.post('/calendars', form);
+        await api.post('/calendars', payload);
       }
       setModalOpen(false);
       await load();
@@ -129,6 +149,12 @@ export default function Calendars() {
             </Select>
           </Field>
           <Field label="Description"><Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
+          <Field label="Default contact" hint="Standing fallback for the NCC on-call lookup when no shift at all covers the requested moment — distinct from an individual shift's own Default tier. Optional.">
+            <Select value={form.defaultPersonId} onChange={(e) => setForm({ ...form, defaultPersonId: e.target.value })} disabled={!form.organizationId}>
+              <option value="">— None —</option>
+              {assignablePeople.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </Select>
+          </Field>
         </div>
       </Modal>
 

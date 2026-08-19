@@ -89,29 +89,30 @@ describe('open read endpoints (no role gate)', () => {
   }
 });
 
-// people.js's requireSelfOrOrgAdmin is a data-dependent gate (id === self)
-// rather than a static role gate, so it doesn't fit ENDPOINT_CHECKS' shape —
-// exercised directly here instead.
-describe('self-or-org-admin: POST /people/:id/photo', () => {
-  it('an Employee (read_only) may act on their own record', async () => {
-    const selfId = personIdFor('read_only');
-    const res = await send('post', `/people/${selfId}/photo`, tokenFor('read_only'));
-    record({ area: 'people', capability: 'crud', op: 'update-own-photo', method: 'post', path: '/people/:id/photo', role: 'read_only', expectedAllowed: true, status: res.status });
+// people.js's POST /:id/photo gate (isSelf || isAdminTier, inline — see
+// routes/people.js) is a data-dependent check rather than a static role
+// gate, so it doesn't fit ENDPOINT_CHECKS' shape — exercised directly here
+// instead.
+describe('self-or-admin-tier: POST /people/:id/photo', () => {
+  it('a User may act on their own record', async () => {
+    const selfId = personIdFor('user');
+    const res = await send('post', `/people/${selfId}/photo`, tokenFor('user'));
+    record({ area: 'people', capability: 'crud', op: 'update-own-photo', method: 'post', path: '/people/:id/photo', role: 'user', expectedAllowed: true, status: res.status });
     expect(res.status).not.toBe(403);
   });
 
-  it("an Employee (read_only) may not act on another person's record", async () => {
-    const otherId = personIdFor('technician');
-    const res = await send('post', `/people/${otherId}/photo`, tokenFor('read_only'));
-    const pass = record({ area: 'people', capability: 'crud', op: 'update-others-photo', method: 'post', path: '/people/:id/photo', role: 'read_only', expectedAllowed: false, status: res.status });
+  it("a User may not act on another person's record", async () => {
+    const otherId = personIdFor('customer_admin');
+    const res = await send('post', `/people/${otherId}/photo`, tokenFor('user'));
+    const pass = record({ area: 'people', capability: 'crud', op: 'update-others-photo', method: 'post', path: '/people/:id/photo', role: 'user', expectedAllowed: false, status: res.status });
     expect(res.status).toBe(403);
     expect(pass).toBe(true);
   });
 
-  it('an Org Admin may act on any record', async () => {
-    const otherId = personIdFor('technician');
-    const res = await send('post', `/people/${otherId}/photo`, tokenFor('org_admin'));
-    record({ area: 'people', capability: 'crud', op: 'update-others-photo', method: 'post', path: '/people/:id/photo', role: 'org_admin', expectedAllowed: true, status: res.status });
+  it('a Customer Admin may act on any record within their scope', async () => {
+    const otherId = personIdFor('user');
+    const res = await send('post', `/people/${otherId}/photo`, tokenFor('customer_admin'));
+    record({ area: 'people', capability: 'crud', op: 'update-others-photo', method: 'post', path: '/people/:id/photo', role: 'customer_admin', expectedAllowed: true, status: res.status });
     expect(res.status).not.toBe(403);
   });
 });

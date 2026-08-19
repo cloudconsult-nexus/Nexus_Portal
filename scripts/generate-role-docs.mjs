@@ -67,11 +67,6 @@ regenerate instead.
 
 ${mdTable(['Role', 'Key'], ROLES.map((r) => [r.label, `\`${r.key}\``]))}
 
-Note: "Employee" in the original role-validation request is mapped onto the
-system's \`read_only\` role, the lowest-privilege role in the platform
-(view-only, no management access). Correct this mapping if a distinct
-"Employee" role was actually intended.
-
 ## Menu visibility
 
 ${renderMenuSection()}
@@ -94,9 +89,12 @@ ${renderReadSection()}
 
 ${renderCrudSection('reports')}
 
-Additionally, \`GET /report-mappings/visible\` is open to every authenticated
-role, filtered per-mapping by that mapping's own \`visible_to_roles\` column
-rather than a blanket role check.
+Additionally, \`GET /reports/mappings\` and \`GET /reports/mappings/:id/embed\`
+(the read-only consumer view of the report catalog — distinct from the
+Global-Admin-only \`/report-mappings\` CRUD routes above) are open to every
+authenticated role, filtered per-mapping by that mapping's own
+\`visible_to_roles\` column rather than a blanket role check. See the "Open
+read access" table above.
 
 ## Messaging access
 
