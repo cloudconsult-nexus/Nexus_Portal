@@ -25,4 +25,12 @@ export const blocks = [
   ]),
 
   callout('Role changes are audited distinctly from other edits (a role_change entry, not update) since they\'re a privilege change — check Audit Logs if a permission question comes up.', 'info'),
+
+  heading('NCC integration (on-call lookup)'),
+  para('Nextiva Contact Center (NCC) can query this Portal mid-call to find out who\'s on call for a Customer right now — see the API Guide\'s "NCC on-call lookup" and "Service authentication" sections for the endpoint itself. Two things it depends on aren\'t yet reachable from the UI, so they need setting via the API or by whoever manages your deployment:'),
+  list([
+    'A Customer\'s timezone (defaults to UTC) — determines how the lookup resolves a UTC instant against that Customer\'s local shift windows.',
+    "A Calendar's standing default contact — who NCC gets back when no shift at all covers the requested instant, not just an empty escalation chain.",
+  ]),
+  callout('The NCC_API_KEY that authenticates NCC\'s requests is a deployment-level secret, not something set from within the app — see RUNBOOK.md if you need to set or rotate it.', 'info'),
 ];

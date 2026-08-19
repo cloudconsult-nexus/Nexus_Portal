@@ -24,7 +24,7 @@ but it's worth knowing what you're about to acquire and why each one is here:
 | Cloud Run | `run.googleapis.com` | Hosts both the `api` (Node/Express) and `web` (static React) services |
 | Cloud SQL | `sqladmin.googleapis.com` | Managed Postgres 16 — the application database |
 | Artifact Registry | `artifactregistry.googleapis.com` | Stores the Docker images `deploy.sh` builds and pushes |
-| Secret Manager | `secretmanager.googleapis.com` | DB password, JWT signing secret, SMTP password, optional integration secrets |
+| Secret Manager | `secretmanager.googleapis.com` | DB password, JWT signing secret, SMTP password, optional integration secrets. `NCC_API_KEY` (Phase 5.4) is not yet among these — see §3.2. |
 | Cloud Storage (GCS) | `storage.googleapis.com` | Org logo/profile photo uploads, plus the Terraform state bucket |
 | Cloud Monitoring | `monitoring.googleapis.com` | Uptime checks + alert policies (`infra/monitoring.tf`) |
 | IAM | `iam.googleapis.com` | Per-service scoped service accounts, least-privilege grants |
@@ -129,6 +129,21 @@ export TF_VAR_alert_notification_email=you@example.com
 **Write these down somewhere durable before continuing** — see
 [RUNBOOK.md](RUNBOOK.md#secret-rotation) for why losing them is painful,
 not catastrophic.
+
+**If you're using the NCC (Nextiva Contact Center) on-call lookup
+integration (Phase 5.4)**, set `NCC_API_KEY` on the `api` Cloud Run service
+**after** the first `deploy.sh` run below — it isn't a `TF_VAR_*` /
+Terraform-managed secret yet, so it isn't provisioned by this step:
+
+```bash
+gcloud run services update oncall-pro-<env>-api --region us-central1 \
+  --update-env-vars NCC_API_KEY="$(openssl rand -base64 32)"
+```
+
+Give NCC the same value out of band. Skipping this is safe for everything
+*except* NCC's own lookup endpoint — the rest of the app works normally
+without it (see RUNBOOK.md's incident entry for what it looks like when
+this was accidentally load-bearing for more than intended).
 
 Review (and override if needed) the rest of the environment's config in
 [`infra/envs/test.tfvars`](infra/envs/test.tfvars) or
