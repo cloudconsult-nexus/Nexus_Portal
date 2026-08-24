@@ -91,8 +91,39 @@ changes across phases 2-4.
      onboarding runbook, and the signed-URL fix for logo/photo storage —
      all done the same day. Optional Customer `parent_id` nesting (display
      only) added afterward at the client's request — see Domain model.
-   - 5.2 (messages/PHI), 5.3 (reports), 5.4 (NCC/Thrio integration), 5.5
-     (in-app onboarding wizard) — not started.
+   - **5.4 (NCC/Thrio integration) is split across two directions — both now
+     partially built, 2026-08-24:**
+     - *Inbound* (NCC calling into the Portal): the on-call-lookup endpoint
+       (`GET /organizations/:orgId/on-call`, `routes/onCall.js`,
+       `migrations/017_ncc_oncall_lookup.sql`) — done, service-API-key
+       auth, since extended to also accept a human session (see "What
+       already lines up well" is unaffected; this is a separate change,
+       2026-08-24).
+     - *Outbound* (Portal calling out to NCC) — **fetch/write layer done,
+       2026-08-24, NOT YET LIVE-VERIFIED against the real Thrio API.**
+       `backend/src/services/ncc-client` — auth (per-tenant Basic-auth
+       token-with-authorities, reactive 401 refresh), messages (list/by-
+       customer/by-id/update-last-follow-up/acknowledge), customers
+       (list/search/by-id/create). Credentials: per-Customer
+       `ncc_org_config` override falling back to a TAS-wide default on
+       `tas_settings` (`migrations/018_ncc_integration.sql`) — encrypted
+       at rest (`lib/secretsCrypto.js`), managed via `/ncc-config` (Global
+       Admin, API-only, no UI yet). `/ncc-debug` is a Global-Admin-only
+       internal pipe-check surface, not the real feature UI. Contract-
+       tested against a mocked Thrio API only — no live NCC credentials
+       were available during this build. **Still needs, with Patrick:**
+       confirming the unacknowledged-messages filter
+       (`?customerId=&acknowledged=false`, not in the Postman collection),
+       real message/customer payload shapes, real token TTL, and whether
+       the per-Customer-vs-TAS-wide credential tiering above actually
+       matches how Nextiva provisions Thrio tenants.
+     - Consuming this in a real Customer Messages/Secure Messaging UI, and
+       wiring `pushOrganizationToNcc` into Customer creation, are explicitly
+       deferred — see `services/ncc-client/index.js`'s comment on why the
+       push stayed a manual/debug action for now.
+   - 5.2 (messages/PHI **UI/data model** — the outbound fetch layer above
+     is the connectivity this will consume), 5.3 (reports), 5.5 (in-app
+     onboarding wizard) — not started.
 
 ## Target spec: TAS Client Portal
 
@@ -124,14 +155,19 @@ already done — Phase 5.1 — kept here for the full original-vs-target picture
   onboarding checklist exists — see `RUNBOOK.md`'s "Onboarding a new tenant"
   section and the `infra/envs/TEMPLATE.*.tenant` files. What's still missing
   is only the in-app first-run configuration wizard itself (Phase 5.5).
-- **NCC/Thrio integration (not started, highest-criticality piece):** the target
-  has NCC calling *into* the Portal in real time during live calls, to an
-  on-call-lookup endpoint (`Client/Customer ID` + `DID`/`Queue ID` + "now" vs
-  "future at date/time" query mode → resolves Primary→Secondary→Tertiary→default,
-  returns name + SMS-capable phone). This is the inverse of the typical
-  portal-calls-vendor pattern — it puts the Portal in NCC's live call path.
-  Auth mechanism for NCC→Portal calls not yet finalized in the spec itself
-  (leaning token/API-key or OAuth2 client-credentials per TAS instance).
+- **NCC/Thrio integration — highest-criticality piece, now partially built
+  (see Build history's 5.4 entry, 2026-08-24) but not yet live-verified.**
+  Inbound direction (NCC calling *into* the Portal in real time during live
+  calls, to resolve Primary→Secondary→Tertiary→default and return name +
+  SMS-capable phone) is done for the core on-call-lookup shape, service-
+  API-key authenticated — the `Client/Customer ID` + `DID`/`Queue ID` +
+  "now" vs "future at date/time" query-mode surface described in the spec
+  doc is `GET /organizations/:orgId/on-call?at=` (`routes/onCall.js`); this
+  is the inverse of the typical portal-calls-vendor pattern, putting the
+  Portal in NCC's live call path. Outbound direction (Portal calling *out*
+  to NCC for messages/customers, human-session Basic-auth per Nextiva
+  engineering) has its fetch/write layer built (`services/ncc-client`) but
+  untested against the live API — see Build history.
 - **Messages/recordings/PHI:** not modeled at all currently (Customer
   Messages/Secure Messaging are nav-only stubs). Target: Portal never persists
   PHI or recording/message content — only metadata (sender, timestamp,

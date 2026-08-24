@@ -67,6 +67,16 @@ export const blocks = [
   code('GET /organizations/:orgId/on-call?at=2026-08-18T14:00:00Z\nX-API-Key: <key>\n\n(or Authorization: Bearer <token> instead of X-API-Key, for a human session)\n\n200 { "onCall": [ { ...same shape as /people, "on_call_role": "primary" }, ... ] }'),
   para('Returns 400 for a malformed orgId or missing/invalid at, 401 for missing/invalid credentials on either scheme, 403 for a human session outside its own Customer subtree, 404 for a well-formed but nonexistent Customer, and 200 { onCall: [] } (not an error) for a Customer with no calendars.'),
 
+  heading('NCC outbound integration (fetch layer)'),
+  para("Separate from the NCC on-call lookup above, and the opposite direction: this is the Portal calling OUT to NCC/Thrio to fetch/write Customer messages and customer records (services/ncc-client), not NCC calling in. Authenticates to NCC with a per-tenant username/password (Basic auth against login.thrio.com) rather than an API key — that's Thrio's only option today. API-only for now, Global Admin only, no frontend screens yet (the real Customer Messages/Secure Messaging UI is a later, separately-designed phase)."),
+  table(['Path', 'Notes'], [
+    ['/ncc-config/:orgId', "GET status (never returns the decrypted credential) / PUT { username, password } to set a Customer's own NCC tenant / DELETE to clear it."],
+    ['/ncc-config/tas/default', 'Same shape, for the TAS-wide default tenant a Customer falls back to when it has no override of its own — see "Credential scoping" below.'],
+    ['/ncc-debug/:orgId/...', "Minimal internal pipe-check surface exercising every ncc-client operation (messages, customers, acknowledge/last-follow-up, create) against a real Customer's configured NCC tenant. Not a sandbox — mutating calls hit NCC's live data."],
+  ]),
+  callout('Credential scoping: a Customer\'s own /ncc-config/:orgId override is tried first, falling back to the TAS-wide /ncc-config/tas/default if the Customer has none configured. Which of these actually matches how Nextiva provisions Thrio tenants per TAS/Customer hasn\'t been confirmed yet — treat this as the working model until that\'s settled.', 'warning'),
+  callout('Not yet verified against the live Thrio API (no credentials/network access were available to test with): the combined ?customerId=&acknowledged=false unacknowledged-messages filter (not in the Postman collection — Patrick described the capability but it needs confirming the server honors it), the real message/customer payload shapes beyond the documented field names, and Thrio\'s actual token TTL (services/ncc-client currently assumes a conservative default and refreshes reactively on any 401, which is correct regardless of the real TTL, but hasn\'t seen a real 401 yet either).', 'warning'),
+
   heading('Conventions'),
   table(['Convention', 'Detail'], [
     ['Request bodies', 'camelCase field names, e.g. organizationId'],

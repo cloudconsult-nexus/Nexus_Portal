@@ -24,6 +24,8 @@ import customerMessagesRoutes from './routes/customerMessages.js';
 import statusAlertsRoutes from './routes/statusAlerts.js';
 import publicBrandingRoutes from './routes/publicBranding.js';
 import onCallRoutes from './routes/onCall.js';
+import nccConfigRoutes from './routes/nccConfig.js';
+import nccDebugRoutes from './routes/nccDebug.js';
 
 // Express app construction, split out from index.js so tests can
 // supertest() it directly without binding a port or starting the
@@ -102,6 +104,12 @@ app.use('/imports', importsRoutes);
 app.use('/report-mappings', reportMappingsRoutes);
 app.use('/customer-messages', customerMessagesRoutes);
 app.use('/status-alerts', statusAlertsRoutes);
+// Outbound NCC (Nextiva Contact Center / Thrio) integration — Phase 5.2
+// fetch layer (services/ncc-client). Separate credential/direction from
+// onCallRoutes above (that's NCC calling INTO the Portal; this is the
+// Portal calling OUT to NCC) — see migrations/018_ncc_integration.sql.
+app.use('/ncc-config', nccConfigRoutes);
+app.use('/ncc-debug', nccDebugRoutes);
 
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 

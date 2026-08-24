@@ -18,6 +18,10 @@
 process.env.NODE_ENV ??= 'test';
 process.env.JWT_SECRET ??= 'test-jwt-secret-not-for-production-use';
 process.env.NCC_API_KEY ??= 'test-ncc-api-key-not-for-production-use';
+// AES-256 key for lib/secretsCrypto.js (services/ncc-client's stored
+// credentials) — 32 raw bytes, base64-encoded, throwaway/test-only like
+// everything else in this file.
+process.env.NCC_CREDENTIALS_ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString('base64');
 process.env.DB_HOST ??= 'localhost';
 process.env.DB_PORT ??= '5432';
 process.env.DB_USER ??= 'oncallpro';
