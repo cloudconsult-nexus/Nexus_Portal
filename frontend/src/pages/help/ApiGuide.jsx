@@ -19,9 +19,9 @@ export const blocks = [
   ]),
 
   heading('Service authentication (NCC)'),
-  para('One route family is not part of the human-facing app: the on-call lookup NCC (Nextiva Contact Center) calls mid-call to resolve who to dispatch to (see "NCC on-call lookup" below). It is authenticated with a static per-instance API key instead of a JWT:'),
+  para('One route is not exclusively part of the human-facing app: the on-call lookup NCC (Nextiva Contact Center) calls mid-call to resolve who to dispatch to (see "NCC on-call lookup" below). It accepts a static per-instance API key instead of a JWT, in addition to the normal human bearer token described above:'),
   code('X-API-Key: <key>'),
-  para('Configured via the NCC_API_KEY environment variable. There is no Person record behind this caller — a request with a missing/wrong key gets 401; if the server-side key itself isn\'t configured, the server fails closed with 500 rather than allowing the request through unauthenticated.'),
+  para('Configured via the NCC_API_KEY environment variable. There is no Person record behind this caller — a request with a missing/wrong key gets 401; if the server-side key itself isn\'t configured, the server fails closed with 500 rather than allowing the request through unauthenticated. Which scheme applies is decided per-request by whether an Authorization header is present: send Authorization: Bearer <token> for the human session path, or X-API-Key with no Authorization header for the service path — the route never tries both.'),
 
   heading('Organization scoping'),
   para('Almost every org-scoped route filters through one shared rule: a Customer Admin/User sees their own Customer + every descendant in the optional parent_id nesting (not just their own single row); a Global Admin sees everything, or can "view as" a specific Customer\'s subtree via ?organizationId=. A non-Global-Admin\'s own ?organizationId= is only honored if it falls within their own subtree.'),
@@ -55,7 +55,7 @@ export const blocks = [
   ]),
 
   heading('NCC on-call lookup'),
-  para('GET /organizations/:orgId/on-call?at=<ISO8601 timestamp> — the inbound endpoint NCC calls mid-call/chat to resolve who to dispatch a message to for a Customer at a given moment. Service-API-key authenticated (see above), not a human JWT route.'),
+  para('GET /organizations/:orgId/on-call?at=<ISO8601 timestamp> — the inbound endpoint NCC calls mid-call/chat to resolve who to dispatch a message to for a Customer at a given moment. Also usable from the human-facing app itself (e.g. an in-app "who\'s on call right now" view): it accepts either a human JWT session or the service API key (see "Service authentication (NCC)" above), whichever scheme the request presents.'),
   list([
     "Resolves the instant into the Customer's local time via its timezone, then checks every one of its calendars and merges the results.",
     'Each covered slot contributes every filled tier — primary, secondary, tertiary, and the slot\'s own default — not just the first match.',
@@ -63,8 +63,9 @@ export const blocks = [
     'Broadcast-mode assignments are excluded entirely — there\'s no primary/secondary/tertiary/default distinction to tag pool members with.',
     'The final list is ordered primary → secondary → tertiary → default across the whole merged result (default always last), with each person tagged on_call_role.',
   ]),
-  code('GET /organizations/:orgId/on-call?at=2026-08-18T14:00:00Z\nX-API-Key: <key>\n\n200 { "onCall": [ { ...same shape as /people, "on_call_role": "primary" }, ... ] }'),
-  para('Returns 400 for a malformed orgId or missing/invalid at, 404 for a well-formed but nonexistent Customer, and 200 { onCall: [] } (not an error) for a Customer with no calendars.'),
+  para('With a human JWT session, :orgId is subject to the same Customer-subtree scoping as GET /people — see "Organization scoping" above (403 if the Customer falls outside the caller\'s own subtree). The service API key path is unscoped, as before: NCC may look up any Customer in the instance.'),
+  code('GET /organizations/:orgId/on-call?at=2026-08-18T14:00:00Z\nX-API-Key: <key>\n\n(or Authorization: Bearer <token> instead of X-API-Key, for a human session)\n\n200 { "onCall": [ { ...same shape as /people, "on_call_role": "primary" }, ... ] }'),
+  para('Returns 400 for a malformed orgId or missing/invalid at, 401 for missing/invalid credentials on either scheme, 403 for a human session outside its own Customer subtree, 404 for a well-formed but nonexistent Customer, and 200 { onCall: [] } (not an error) for a Customer with no calendars.'),
 
   heading('Conventions'),
   table(['Convention', 'Detail'], [
