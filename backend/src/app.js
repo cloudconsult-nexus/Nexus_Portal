@@ -24,6 +24,8 @@ import customerMessagesRoutes from './routes/customerMessages.js';
 import statusAlertsRoutes from './routes/statusAlerts.js';
 import publicBrandingRoutes from './routes/publicBranding.js';
 import onCallRoutes from './routes/onCall.js';
+import nccConfigRoutes from './routes/nccConfig.js';
+import nccDebugRoutes from './routes/nccDebug.js';
 
 // Express app construction, split out from index.js so tests can
 // supertest() it directly without binding a port or starting the
@@ -73,17 +75,19 @@ app.use('/public-branding', publicBrandingRoutes);
 
 app.use('/auth', authRoutes);
 // Mounted BEFORE organizationsRoutes, same '/organizations' prefix: it's a
-// separate router, service-API-key-gated (NCC), not human-JWT-gated — see
-// routes/onCall.js. organizationsRoutes' own top-level `router.use(requireAuth,
-// ...)` is unconditional (no path filter), so it intercepts every request
-// under '/organizations/*' before Express even checks that router's own
-// route patterns — mounting onCallRoutes second would never be reached.
-// onCallRoutes only claims the exact '/:orgId/on-call' GET route, and
-// requireApiKey is attached to that one route handler (not via
-// `router.use()` inside onCall.js) — a bare `router.use()` there would run
-// for every request reaching this router before path matching happens,
-// which would 500 all of '/organizations/*' whenever NCC_API_KEY isn't
-// configured (this happened in test on 2026-08-19; see routes/onCall.js).
+// separate router accepting either NCC's service API key or a human JWT
+// session (routes/onCall.js's requireAuthOrApiKey), not exclusively
+// human-JWT-gated the way organizationsRoutes is. organizationsRoutes' own
+// top-level `router.use(requireAuth, ...)` is unconditional (no path
+// filter), so it intercepts every request under '/organizations/*' before
+// Express even checks that router's own route patterns — mounting
+// onCallRoutes second would never be reached. onCallRoutes only claims the
+// exact '/:orgId/on-call' GET route, and requireAuthOrApiKey is attached to
+// that one route handler (not via `router.use()` inside onCall.js) — a bare
+// `router.use()` there would run for every request reaching this router
+// before path matching happens, which would 500 all of '/organizations/*'
+// whenever NCC_API_KEY isn't configured and no Authorization header is
+// present (this happened in test on 2026-08-19; see routes/onCall.js).
 app.use('/organizations', onCallRoutes);
 app.use('/organizations', organizationsRoutes);
 app.use('/tas-settings', tasSettingsRoutes);
@@ -100,6 +104,12 @@ app.use('/imports', importsRoutes);
 app.use('/report-mappings', reportMappingsRoutes);
 app.use('/customer-messages', customerMessagesRoutes);
 app.use('/status-alerts', statusAlertsRoutes);
+// Outbound NCC (Nextiva Contact Center / Thrio) integration — Phase 5.2
+// fetch layer (services/ncc-client). Separate credential/direction from
+// onCallRoutes above (that's NCC calling INTO the Portal; this is the
+// Portal calling OUT to NCC) — see migrations/018_ncc_integration.sql.
+app.use('/ncc-config', nccConfigRoutes);
+app.use('/ncc-debug', nccDebugRoutes);
 
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 

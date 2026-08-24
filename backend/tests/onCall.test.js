@@ -3,6 +3,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import app from '../src/app.js';
 import pool from '../src/db/pool.js';
+import { signToken } from '../src/middleware/auth.js';
 
 // Coverage for GET /organizations/:orgId/on-call — the NCC-facing lookup
 // (routes/onCall.js, lib/calendarService.js#getOnCallAt, CLAUDE.md Phase
@@ -17,6 +18,7 @@ const DATE = '2026-08-18'; // matches "today" per CLAUDE.md's currentDate
 let org, otherCalendarOrg;
 let calendarWithChain, calendarDefaultOnly, calendarNoConfig;
 let primary, secondary, tertiary, slotDefault, calendarDefault;
+let globalAdmin, ownCustomerUser, outsiderOrg, outsiderUser;
 
 async function insertOrg(name, timezone = TIMEZONE) {
   const { rows } = await pool.query(
@@ -26,11 +28,11 @@ async function insertOrg(name, timezone = TIMEZONE) {
   return rows[0];
 }
 
-async function insertPerson(name, organizationId) {
+async function insertPerson(name, organizationId, role = 'user') {
   const { rows } = await pool.query(
     `INSERT INTO people (organization_id, name, primary_phone, sms_phone, email, role)
-     VALUES ($1, $2, '+15555550100', '+15555550101', $3, 'user') RETURNING *`,
-    [organizationId, name, `${name.toLowerCase().replace(/\s+/g, '.')}@example.test`]
+     VALUES ($1, $2, '+15555550100', '+15555550101', $3, $4) RETURNING *`,
+    [organizationId, name, `${name.toLowerCase().replace(/\s+/g, '.')}@example.test`, role]
   );
   return rows[0];
 }
@@ -88,10 +90,17 @@ beforeAll(async () => {
   // "full coverage gap" case, falls back to the calendar's own standing
   // default.
   calendarNoConfig = await insertCalendar(org.id, 'Coverage Gap Calendar', calendarDefault.id);
+
+  // Human-session fixtures for the JWT auth path (requireAuthOrApiKey) —
+  // matches the scoping people.js's GET /:id already enforces.
+  globalAdmin = await insertPerson('Gia GlobalAdmin', org.id, 'global_admin');
+  ownCustomerUser = await insertPerson('Ollie OwnCustomer', org.id, 'customer_admin');
+  outsiderOrg = await insertOrg('NCC Test Customer (unrelated, for scoping)');
+  outsiderUser = await insertPerson('Uma Outsider', outsiderOrg.id, 'customer_admin');
 }, 20000);
 
 afterAll(async () => {
-  const orgIds = [org.id, otherCalendarOrg.id];
+  const orgIds = [org.id, otherCalendarOrg.id, outsiderOrg.id];
   await pool.query('DELETE FROM assignments WHERE calendar_id IN (SELECT id FROM calendars WHERE organization_id = ANY($1))', [orgIds]);
   await pool.query('DELETE FROM calendars WHERE organization_id = ANY($1)', [orgIds]);
   await pool.query('DELETE FROM people WHERE organization_id = ANY($1)', [orgIds]);
@@ -193,6 +202,50 @@ describe('GET /organizations/:orgId/on-call', () => {
   it('rejects a missing/invalid `at` parameter', async () => {
     const res = await get(`/organizations/${org.id}/on-call`);
     expect(res.status).toBe(400);
+  });
+});
+
+// requireAuthOrApiKey's second path: a human JWT session, matching what
+// already works on GET /people (routes/people.js). Independent of the
+// X-API-Key coverage above — these requests carry an Authorization header
+// and no X-API-Key at all.
+describe('GET /organizations/:orgId/on-call — human JWT session auth', () => {
+  function getAs(personToken, path) {
+    return request(app).get(path).set('Authorization', `Bearer ${personToken}`);
+  }
+
+  it('accepts a valid human session token, same response shape as the API-key path', async () => {
+    const res = await getAs(signToken(ownCustomerUser), `/organizations/${org.id}/on-call?at=${DATE}T14:00:00Z`);
+    expect(res.status).toBe(200);
+    const primaryEntry = res.body.onCall.find((p) => p.id === primary.id);
+    expect(primaryEntry).toMatchObject({ name: 'Priya Primary', on_call_role: 'primary' });
+  });
+
+  it('rejects an expired/garbled bearer token distinctly from a missing one', async () => {
+    const res = await getAs('not-a-real-jwt', `/organizations/${org.id}/on-call?at=${DATE}T14:00:00Z`);
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe('Invalid or expired token');
+  });
+
+  it("a Customer Admin/User may look up their own Customer's on-call", async () => {
+    const res = await getAs(signToken(ownCustomerUser), `/organizations/${org.id}/on-call?at=${DATE}T14:00:00Z`);
+    expect(res.status).toBe(200);
+  });
+
+  it("a Customer Admin/User is scoped out of a different Customer's on-call (matches GET /people/:id)", async () => {
+    const res = await getAs(signToken(outsiderUser), `/organizations/${org.id}/on-call?at=${DATE}T14:00:00Z`);
+    expect(res.status).toBe(403);
+  });
+
+  it('a Global Admin may look up any Customer', async () => {
+    const res = await getAs(signToken(globalAdmin), `/organizations/${otherCalendarOrg.id}/on-call?at=${DATE}T14:00:00Z`);
+    expect(res.status).toBe(200);
+    expect(res.body.onCall).toEqual([]);
+  });
+
+  it('X-API-Key is still accepted with no Authorization header present (NCC path unchanged)', async () => {
+    const res = await get(`/organizations/${org.id}/on-call?at=${DATE}T14:00:00Z`);
+    expect(res.status).toBe(200);
   });
 });
 
