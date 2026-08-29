@@ -100,7 +100,10 @@ changes across phases 2-4.
        already lines up well" is unaffected; this is a separate change,
        2026-08-24).
      - *Outbound* (Portal calling out to NCC) — **fetch/write layer done,
-       2026-08-24, NOT YET LIVE-VERIFIED against the real Thrio API.**
+       2026-08-24, STILL NOT LIVE-VERIFIED against the real Thrio API**
+       (Patrick answered our open questions the same day, 2026-08-24, but
+       actually exercising the API needs Tom's own login working first —
+       see below).
        `backend/src/services/ncc-client` — auth (per-tenant Basic-auth
        token-with-authorities, reactive 401 refresh), messages (list/by-
        customer/by-id/update-last-follow-up/acknowledge), customers
@@ -111,12 +114,34 @@ changes across phases 2-4.
        Admin, API-only, no UI yet). `/ncc-debug` is a Global-Admin-only
        internal pipe-check surface, not the real feature UI. Contract-
        tested against a mocked Thrio API only — no live NCC credentials
-       were available during this build. **Still needs, with Patrick:**
-       confirming the unacknowledged-messages filter
-       (`?customerId=&acknowledged=false`, not in the Postman collection),
-       real message/customer payload shapes, real token TTL, and whether
-       the per-Customer-vs-TAS-wide credential tiering above actually
-       matches how Nextiva provisions Thrio tenants.
+       were available during the initial build.
+       **Confirmed by Patrick, 2026-08-24 (reply on "NCC Messages/
+       Customers API — what we need to finish validating the outbound
+       integration"), and already reflected in code:**
+       - Unacknowledged-messages filter (`?customerId=&acknowledged=false`)
+         — server honors it, confirmed against the real collection.
+       - Create Customer's id comes back in `_id` and `customerId`, NOT
+         `id` — `services/ncc-client/index.js#pushOrganizationToNcc` fixed
+         to check `_id` first (was checking `id` first, which would have
+         missed it on a real response). Duplicate name → 409.
+       - Token TTL: username/password login is good for <24h (a separate
+         6-month tenant-level security token exists too, via an endpoint
+         not in our Postman collection — worth adopting later to cut down
+         on daily re-logins). `auth.js`'s assumed-TTL default updated from
+         a 10-min guess to 20h.
+       - No rate limits to worry about during testing.
+       **Still open:**
+       - Real message/customer payload shapes — Patrick wants us to
+         capture these ourselves via Postman/live calls rather than send
+         samples, which needs the credentials below working first.
+       - Whether the per-Customer-vs-TAS-wide credential tiering matches
+         how Nextiva actually provisions Thrio tenants — Patrick deferred
+         this one to Steve (it's about how *we* provision Customers, not
+         something Nextiva's side decides).
+       - **Live credentials aren't usable yet**: Patrick repointed the NCC
+         tenant's admin login at `tom@amiovox.ai`, but a password reset
+         still needs to happen before that login actually works — nothing
+         has run against the live API yet because of this.
      - Consuming this in a real Customer Messages/Secure Messaging UI, and
        wiring `pushOrganizationToNcc` into Customer creation, are explicitly
        deferred — see `services/ncc-client/index.js`'s comment on why the

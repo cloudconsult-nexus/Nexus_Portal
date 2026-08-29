@@ -4,22 +4,28 @@ import { nccLog } from './logger.js';
 
 const TOKEN_ENDPOINT = 'https://login.thrio.com/provider/token-with-authorities';
 
-// Thrio's token TTL is NOT documented in the Postman collection and hasn't
-// been observed against the live API yet (build brief: "Token TTL is
-// unknown — instrument and log expiry behavior on first real use, then
-// implement refresh/re-auth logic"). Two things follow from that:
+// Thrio's token TTL is now confirmed (Patrick, 2026-08-24, replying on "NCC
+// Messages/Customers API — what we need to finish validating the outbound
+// integration"): a username/password `token-with-authorities` login is
+// "good for less than 24 hours." (There's a separate tenant-level security
+// token, valid 6 months, via an endpoint NOT in the Postman collection we
+// have — worth adopting later to cut down on daily re-logins, but not built
+// here yet since we'd need that endpoint's shape from Patrick first.)
+//
+// 20h — comfortably under the confirmed "<24h" ceiling — replaces the
+// original 10-minute guess. Two things still follow from the uncertainty in
+// exactly how far under 24h it runs:
 //
 //   1. The primary refresh mechanism is REACTIVE, not time-based: http.js
 //      retries exactly once on a 401 by discarding the cached token and
-//      re-authenticating, which is correct regardless of what the real TTL
-//      turns out to be.
-//   2. This assumed TTL only controls a conservative PROACTIVE refresh (so
-//      a long-idle process doesn't open every request with a guaranteed
-//      401-then-retry round trip) — it is a guess, not a confirmed value.
-//      Every real auth and every real 401 is logged with the elapsed time
-//      since the token was issued (see below and http.js), specifically so
-//      that guess can be replaced with Thrio's actual behavior once seen.
-const ASSUMED_TOKEN_TTL_MS = Number(process.env.NCC_TOKEN_ASSUMED_TTL_MS) || 10 * 60 * 1000; // 10 min
+//      re-authenticating, which is correct regardless of the exact TTL.
+//   2. This value only controls a conservative PROACTIVE refresh (so a
+//      long-idle process doesn't open a request with a near-guaranteed
+//      401-then-retry round trip). Every real auth and every real 401 is
+//      still logged with the elapsed time since issuance (see below and
+//      http.js), so this can be tightened further once real numbers show
+//      how close to 24h a token actually lasts.
+const ASSUMED_TOKEN_TTL_MS = Number(process.env.NCC_TOKEN_ASSUMED_TTL_MS) || 20 * 60 * 60 * 1000; // 20h
 
 // In-memory per-process cache, same tradeoff as lib/storage.js's
 // SIGNED_URL_CACHE — Cloud Run instances are ephemeral/multiple, so this

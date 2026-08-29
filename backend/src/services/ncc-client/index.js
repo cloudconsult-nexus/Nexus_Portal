@@ -62,13 +62,19 @@ export async function pushOrganizationToNcc(organizationId) {
     // organizations — see comment above.
   });
 
-  // Response shape is unverified (build brief: "Capture a real ... customer
-  // payload on first successful fetch ... fields ... aren't fully known
-  // yet") — defensively check the field names that would make sense from
-  // the collection (`id`) before falling back to a second guess.
-  const nccCustomerId = created?.id ?? created?.customerId ?? null;
+  // Field names confirmed by Patrick 2026-08-24 (reply on "NCC Messages/
+  // Customers API — what we need to finish validating the outbound
+  // integration"): "the ID is returned in the _id and customerId fields."
+  // `_id` checked first per his ordering; `customerId` as the documented
+  // alternate; `id` kept as a last-resort fallback in case a future API
+  // version changes shape — cheap insurance, not a guess we're relying on.
+  //
+  // He also confirmed creating a customer with a name that already exists
+  // returns 409 — that surfaces as a normal NccApiError with status 409
+  // from http.js, nothing extra to handle here.
+  const nccCustomerId = created?._id ?? created?.customerId ?? created?.id ?? null;
   if (!nccCustomerId) {
-    nccLog({ event: 'push-customer-warning', organizationId, note: 'Create Customer response had no recognizable id field — response shape needs confirming with Patrick', responseKeys: created && typeof created === 'object' ? Object.keys(created) : typeof created });
+    nccLog({ event: 'push-customer-warning', organizationId, note: 'Create Customer response had no recognizable id field (_id/customerId/id) — unexpected given Patrick\'s confirmed shape, worth a follow-up', responseKeys: created && typeof created === 'object' ? Object.keys(created) : typeof created });
     throw new NccApiError('NCC Create Customer succeeded but returned no recognizable customer id — see logs', { body: created });
   }
 
