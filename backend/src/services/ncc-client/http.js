@@ -3,7 +3,11 @@ import { NccApiError } from './errors.js';
 import { nccLog } from './logger.js';
 
 function buildUrl(location, path, query) {
-  const url = new URL(path, `https://${location}`);
+  // Thrio's token-with-authorities response returns `location` as a full
+  // URL (e.g. "https://mancity.thrio.io"), not a bare hostname as the
+  // build brief assumed — confirmed live 2026-09-02. Handle both shapes.
+  const base = /^https?:\/\//i.test(location) ? location : `https://${location}`;
+  const url = new URL(path, base);
   if (query) {
     for (const [k, v] of Object.entries(query)) {
       if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
