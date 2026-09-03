@@ -266,9 +266,21 @@ gsutil cp gs://oncall-pro-prod-branding-<project-id>/<path>#<generation> gs://on
   domain-mappings list --region us-central1 --project <project-id>` (or
   check `infra/` for a `google_cloud_run_domain_mapping` resource) before
   setting `CORS_ORIGIN`, rather than assuming the `-web` service's own URL
-  is it. Fix: `gcloud run services update oncall-pro-<env>-api --project
-  <project-id> --region us-central1 --update-env-vars
+  is it. One-off fix: `gcloud run services update oncall-pro-<env>-api
+  --project <project-id> --region us-central1 --update-env-vars
   "CORS_ORIGIN=https://<actual-domain>" --no-invoker-iam-check --quiet`.
+  **This is a real bug in the deploy pipeline itself, not just a one-time
+  misconfiguration** — both `scripts/deploy.sh` and `cloudbuild.yaml` had
+  (as of 2026-09-03) a "lock CORS down" step that always set `CORS_ORIGIN`
+  to the `-web` service's own URL, unconditionally, on every deploy — so a
+  redeploy of an environment on a custom domain silently reintroduces this
+  exact failure. Fixed the same day: both now respect an optional
+  override (`PUBLIC_WEB_URL` env var for `deploy.sh`, `_PUBLIC_WEB_URL`
+  substitution for `cloudbuild.yaml`) that takes precedence over the
+  `-web` URL when set — set it once per environment with a custom domain
+  (`export PUBLIC_WEB_URL=https://test.cloudconsult.technology` before
+  running `deploy.sh test`, or the equivalent trigger substitution for
+  Cloud Build) and every future deploy keeps CORS correct automatically.
 - **Email not sending**: check `SMTP_HOST` is actually set for this
   environment (`infra/envs/prod.tfvars` doesn't have it yet — see "Outbound
   email (SendGrid)" below) — if unset, invites/resets are silently only
