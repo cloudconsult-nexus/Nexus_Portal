@@ -74,7 +74,9 @@ router.patch('/:orgId/messages/:messageId/last-follow-up', async (req, res) => {
   try {
     const { lastFollowUp } = z.object({ lastFollowUp: z.number().int() }).parse(req.body);
     const result = await ncc.updateMessageLastFollowUp(req.params.orgId, req.params.messageId, lastFollowUp);
-    await req.logAudit({ action: 'update', entityType: 'ncc_message', entityId: req.params.messageId, newValues: { lastFollowUp } });
+    // entity_id is a UUID column (migrations/001_init.sql) — NCC message
+    // ids aren't UUIDs, so the id goes in entity_name (TEXT) instead.
+    await req.logAudit({ action: 'update', entityType: 'ncc_message', entityName: req.params.messageId, newValues: { lastFollowUp } });
     res.json(result);
   } catch (err) {
     respondError(res, err);
@@ -85,7 +87,7 @@ router.patch('/:orgId/messages/:messageId/acknowledge', async (req, res) => {
   try {
     const { acknowledgedAt } = z.object({ acknowledgedAt: z.number().int() }).parse(req.body);
     const result = await ncc.acknowledgeMessage(req.params.orgId, req.params.messageId, acknowledgedAt);
-    await req.logAudit({ action: 'update', entityType: 'ncc_message', entityId: req.params.messageId, newValues: { acknowledged: true, acknowledgedAt } });
+    await req.logAudit({ action: 'update', entityType: 'ncc_message', entityName: req.params.messageId, newValues: { acknowledged: true, acknowledgedAt } });
     res.json(result);
   } catch (err) {
     respondError(res, err);
