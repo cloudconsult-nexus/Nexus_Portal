@@ -32,6 +32,26 @@ steps:
       - '--quiet'
     id: deploy-api
 
+  # Public access without an `allUsers` IAM binding — required verbatim
+  # under orgs with the iam.allowedPolicyMemberDomains (Domain Restricted
+  # Sharing) constraint, and harmless otherwise. See infra/cloudrun.tf for
+  # why this isn't a Terraform resource, and scripts/deploy.sh for the twin
+  # of this step. Must be restated on every deploy — a `gcloud run deploy`
+  # that omits it silently reverts the service to requiring auth (2026-09-03:
+  # discovered the hard way when this pipeline was first run without it).
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - run
+      - services
+      - update
+      - '${_APP_NAME}-api'
+      - '--region=${_REGION}'
+      - '--no-invoker-iam-check'
+      - '--quiet'
+    id: invoker-check-api
+    waitFor: ['deploy-api']
+
   # ── Web ────────────────────────────────────────────────────────────────
   - name: 'gcr.io/cloud-builders/docker'
     args:
@@ -58,6 +78,41 @@ steps:
       - '--region=${_REGION}'
       - '--quiet'
     id: deploy-web
+
+  # Twin of invoker-check-api above — same reasoning, same requirement to
+  # restate on every deploy.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - run
+      - services
+      - update
+      - '${_APP_NAME}-web'
+      - '--region=${_REGION}'
+      - '--no-invoker-iam-check'
+      - '--quiet'
+    id: invoker-check-web
+    waitFor: ['deploy-web']
+
+  # ── Lock CORS down to the real web URL now that we know it ───────────────
+  # Twin of the equivalent step in scripts/deploy.sh — see its comment for
+  # why --no-invoker-iam-check is re-specified here too (it does not
+  # reliably persist across a subsequent `gcloud run services update` call
+  # that doesn't repeat it).
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        WEB_URL=$(gcloud run services describe "${_APP_NAME}-web" --region="${_REGION}" --format='value(status.url)')
+        echo "==> Restricting API CORS to $$WEB_URL"
+        gcloud run services update "${_APP_NAME}-api" \
+          --region="${_REGION}" \
+          --update-env-vars "CORS_ORIGIN=$$WEB_URL" \
+          --no-invoker-iam-check --quiet
+    id: lock-cors
+    waitFor: ['invoker-check-api', 'invoker-check-web']
 
 substitutions:
   _REGION: us-central1
