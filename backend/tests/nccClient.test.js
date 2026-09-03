@@ -128,6 +128,23 @@ describe('auth (token-with-authorities)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  // Confirmed live 2026-09-02: Thrio's token-with-authorities response
+  // returns `location` as a full URL (e.g. "https://mancity.thrio.io"), not
+  // a bare hostname as originally assumed — http.js#buildUrl handles both
+  // shapes. This pins the full-URL case, which none of the other tests
+  // here exercise (they all mock `location` as a bare hostname).
+  it('builds the request URL correctly when location is a full URL, not a bare hostname', async () => {
+    await upsertOrganizationCredentials(org.id, { username: 'org-user', password: 'org-pass' });
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'tok-1', location: 'https://mancity.thrio.io' }))
+      .mockResolvedValueOnce(jsonResponse(200, []));
+
+    await ncc.getAllMessages(org.id);
+
+    const [apiUrl] = fetchMock.mock.calls[1];
+    expect(apiUrl).toBe('https://mancity.thrio.io/data/api/types/message/');
+  });
+
   it('persists the location domain and auth timestamp on success', async () => {
     await upsertOrganizationCredentials(org.id, { username: 'org-user', password: 'org-pass' });
     fetchMock
