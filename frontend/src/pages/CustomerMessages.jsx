@@ -25,6 +25,37 @@ function formatTimestamp(epochMs) {
   return new Date(Number(epochMs)).toLocaleString();
 }
 
+function StatusBadge({ acknowledged }) {
+  return acknowledged ? (
+    <Badge tone="green"><CheckCircle2 size={12} /> Acknowledged</Badge>
+  ) : (
+    <Badge tone="amber"><Clock size={12} /> Unacknowledged</Badge>
+  );
+}
+
+// Below `sm`, a data table just moves the overflow problem sideways (extra
+// columns end up off-screen, requiring a horizontal scroll to reach them) —
+// a stacked card puts every field within a single vertical read, so this is
+// a different layout for the same rows rather than a squeezed-down table.
+function MessageCard({ message, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full text-left px-4 py-3 border-b border-line last:border-b-0 hover:bg-surface active:bg-surface"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <span className="font-medium text-ink truncate">{message.contactId || '—'}</span>
+        {message.priority && <Badge tone={PRIORITY_TONE[message.priority] || 'neutral'} className="shrink-0">P{message.priority}</Badge>}
+      </div>
+      <div className="mt-1.5 flex items-center justify-between gap-3 text-xs text-muted">
+        <span>{formatTimestamp(message.createdAt)}</span>
+        <StatusBadge acknowledged={message.acknowledged} />
+      </div>
+    </button>
+  );
+}
+
 function AckFilterTabs({ value, onChange }) {
   return (
     <Tabs
@@ -110,11 +141,7 @@ function MessageDetailPanel({ message, organizationId, onClose, onChanged }) {
           {error && <ErrorBanner message={error} />}
 
           <div className="flex items-center gap-2">
-            {message.acknowledged ? (
-              <Badge tone="green"><CheckCircle2 size={12} /> Acknowledged</Badge>
-            ) : (
-              <Badge tone="amber"><Clock size={12} /> Unacknowledged</Badge>
-            )}
+            <StatusBadge acknowledged={message.acknowledged} />
             {message.priority && <Badge tone={PRIORITY_TONE[message.priority] || 'neutral'}>Priority {message.priority}</Badge>}
           </div>
 
@@ -196,19 +223,28 @@ export default function CustomerMessages() {
             {!data || data.messages.length === 0 ? (
               <EmptyState icon={MessageSquare} title="No messages" description="Nothing matches this filter for the selected Customer." />
             ) : (
-              <Table columns={[{ label: 'Contact' }, { label: 'Priority' }, { label: 'Created' }, { label: 'Last follow-up' }, { label: 'Status' }]}>
-                {data.messages.map((m) => (
-                  <tr key={m.messageId || m._id} className="hover:bg-surface cursor-pointer" onClick={() => setSelected(m)}>
-                    <td className="px-4 py-3 font-medium text-ink whitespace-nowrap">{m.contactId || '—'}</td>
-                    <td className="px-4 py-3 whitespace-nowrap">{m.priority ? <Badge tone={PRIORITY_TONE[m.priority] || 'neutral'}>P{m.priority}</Badge> : '—'}</td>
-                    <td className="px-4 py-3 whitespace-nowrap text-muted">{formatTimestamp(m.createdAt)}</td>
-                    <td className="px-4 py-3 whitespace-nowrap text-muted">{formatTimestamp(m.lastFollowUp)}</td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      {m.acknowledged ? <Badge tone="green"><CheckCircle2 size={12} /> Acknowledged</Badge> : <Badge tone="amber"><Clock size={12} /> Unacknowledged</Badge>}
-                    </td>
-                  </tr>
-                ))}
-              </Table>
+              <>
+                {/* Card list below `sm` — see MessageCard's comment. */}
+                <div className="sm:hidden">
+                  {data.messages.map((m) => (
+                    <MessageCard key={m.messageId || m._id} message={m} onClick={() => setSelected(m)} />
+                  ))}
+                </div>
+
+                <div className="hidden sm:block">
+                  <Table columns={[{ label: 'Contact' }, { label: 'Priority' }, { label: 'Created' }, { label: 'Last follow-up' }, { label: 'Status' }]}>
+                    {data.messages.map((m) => (
+                      <tr key={m.messageId || m._id} className="hover:bg-surface cursor-pointer" onClick={() => setSelected(m)}>
+                        <td className="px-4 py-3 font-medium text-ink whitespace-nowrap">{m.contactId || '—'}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">{m.priority ? <Badge tone={PRIORITY_TONE[m.priority] || 'neutral'}>P{m.priority}</Badge> : '—'}</td>
+                        <td className="px-4 py-3 whitespace-nowrap text-muted">{formatTimestamp(m.createdAt)}</td>
+                        <td className="px-4 py-3 whitespace-nowrap text-muted">{formatTimestamp(m.lastFollowUp)}</td>
+                        <td className="px-4 py-3 whitespace-nowrap"><StatusBadge acknowledged={m.acknowledged} /></td>
+                      </tr>
+                    ))}
+                  </Table>
+                </div>
+              </>
             )}
           </Card>
         )}
