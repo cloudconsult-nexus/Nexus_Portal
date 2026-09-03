@@ -289,6 +289,15 @@ gsutil cp gs://oncall-pro-prod-branding-<project-id>/<path>#<generation> gs://on
   `SMTP_HOST` is set but mail still isn't arriving, check SendGrid's
   Activity feed for bounces/blocks (often an unauthenticated sending
   domain) before assuming it's an app bug.
+- **Locked out of an existing account, and the forgot-password flow isn't
+  usable** (SMTP unset per the note above, or you just don't want to wait
+  on it): `./scripts/reset-password.sh <instance-connection-name> <email>
+  <new-password>` sets a new password directly against the deployed DB via
+  the Cloud SQL Auth Proxy — same pattern as `seed-admin.sh`, but updates
+  an existing person instead of only creating new ones (`seed-admin.sh`
+  silently skips if the email already exists). Also clears any account
+  lockout (`failed_login_attempts`/`locked_until`) so the reset account
+  can actually log in.
 
 ## Scaling & cost knobs
 
