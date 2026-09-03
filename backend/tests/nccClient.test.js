@@ -128,6 +128,23 @@ describe('auth (token-with-authorities)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  // Confirmed live 2026-09-02: Thrio's token-with-authorities response
+  // returns `location` as a full URL (e.g. "https://mancity.thrio.io"), not
+  // a bare hostname as originally assumed — http.js#buildUrl handles both
+  // shapes. This pins the full-URL case, which none of the other tests
+  // here exercise (they all mock `location` as a bare hostname).
+  it('builds the request URL correctly when location is a full URL, not a bare hostname', async () => {
+    await upsertOrganizationCredentials(org.id, { username: 'org-user', password: 'org-pass' });
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'tok-1', location: 'https://mancity.thrio.io' }))
+      .mockResolvedValueOnce(jsonResponse(200, []));
+
+    await ncc.getAllMessages(org.id);
+
+    const [apiUrl] = fetchMock.mock.calls[1];
+    expect(apiUrl).toBe('https://mancity.thrio.io/data/api/types/message/');
+  });
+
   it('persists the location domain and auth timestamp on success', async () => {
     await upsertOrganizationCredentials(org.id, { username: 'org-user', password: 'org-pass' });
     fetchMock
@@ -276,17 +293,31 @@ describe('customers operations — request shapes, incl. the addresss misspellin
 });
 
 describe('pushOrganizationToNcc', () => {
-  it('creates the NCC customer and persists the returned id', async () => {
+  // Field names confirmed by Patrick 2026-08-24: real Create Customer
+  // responses carry the new id in `_id` (and also `customerId`) — `id`
+  // alone (the collection's own field-name guess) is not what the live
+  // API actually returns.
+  it('creates the NCC customer and persists the id from _id', async () => {
     await upsertTasCredentials({ username: 'tas-user', password: 'tas-pass' });
     fetchMock
       .mockResolvedValueOnce(jsonResponse(200, { token: 'tok', location: 'tenant1.thrio.com' }))
-      .mockResolvedValueOnce(jsonResponse(201, { id: 'ncc-cust-99' }));
+      .mockResolvedValueOnce(jsonResponse(201, { _id: 'ncc-cust-99', customerId: 'ncc-cust-99' }));
 
     const result = await ncc.pushOrganizationToNcc(org.id);
     expect(result.nccCustomerId).toBe('ncc-cust-99');
 
     const status = await getNccStatus(org.id);
     expect(status.nccCustomerId).toBe('ncc-cust-99');
+  });
+
+  it('falls back to customerId, then id, if _id is absent', async () => {
+    await upsertTasCredentials({ username: 'tas-user', password: 'tas-pass' });
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'tok', location: 'tenant1.thrio.com' }))
+      .mockResolvedValueOnce(jsonResponse(201, { customerId: 'ncc-cust-fallback' }));
+
+    const result = await ncc.pushOrganizationToNcc(org.id);
+    expect(result.nccCustomerId).toBe('ncc-cust-fallback');
   });
 
   it('throws (without silently dropping the write) when the response has no recognizable id', async () => {
