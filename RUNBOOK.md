@@ -248,6 +248,27 @@ gsutil cp gs://oncall-pro-prod-branding-<project-id>/<path>#<generation> gs://on
   reaching this within 30s (6 × 5s, `infra/cloudrun.tf`) — check logs for a
   crash on boot (usually a bad `DB_PASSWORD`/`JWT_SECRET` or an unreachable
   Cloud SQL instance).
+- **"Failed to fetch" in the browser on every API call** (login,
+  forgot-password, anything — not one specific route): before suspecting the
+  app, check `CORS_ORIGIN` on that environment's `-api` service —
+  `gcloud run services describe oncall-pro-<env>-api --project <project-id>
+  --region us-central1 --format=yaml | grep -A2 CORS_ORIGIN`. `cors()`
+  (`backend/src/app.js`) does an exact string match against the request's
+  `Origin` header, so this has to be the domain the browser is actually
+  loading the web app from — e.g. `https://test.cloudconsult.technology` —
+  not the `-web` service's own `*.run.app` URL. A mismatch here (confirmed
+  live 2026-09-03 on `test`) makes the browser block every request before
+  it ever reaches the API, which surfaces client-side as a generic "Failed
+  to fetch" with no CORS-specific wording and no failed request even
+  visible in some cases — indistinguishable at a glance from the API being
+  down, so it's easy to spend time chasing a crash that isn't there. Find
+  what domain the environment is actually served from with `gcloud run
+  domain-mappings list --region us-central1 --project <project-id>` (or
+  check `infra/` for a `google_cloud_run_domain_mapping` resource) before
+  setting `CORS_ORIGIN`, rather than assuming the `-web` service's own URL
+  is it. Fix: `gcloud run services update oncall-pro-<env>-api --project
+  <project-id> --region us-central1 --update-env-vars
+  "CORS_ORIGIN=https://<actual-domain>" --no-invoker-iam-check --quiet`.
 - **Email not sending**: check `SMTP_HOST` is actually set for this
   environment (`infra/envs/prod.tfvars` doesn't have it yet — see "Outbound
   email (SendGrid)" below) — if unset, invites/resets are silently only
