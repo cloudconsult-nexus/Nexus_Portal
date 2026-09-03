@@ -237,7 +237,7 @@ describe('messages operations — request shapes', () => {
     expect(JSON.parse(opts.body)).toEqual({ acknowledged: true, acknowledgedAt: 1755500000000 });
   });
 
-  it('getUnacknowledgedMessages (unverified filter) sends customerId + acknowledged=false together', async () => {
+  it('getUnacknowledgedMessages sends customerId + acknowledged=false together', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, []));
     await ncc.getUnacknowledgedMessages(org.id, { customerId: 'cust-1' });
     const url = new URL(fetchMock.mock.calls[1][0]);
