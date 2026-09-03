@@ -248,6 +248,43 @@ gsutil cp gs://oncall-pro-prod-branding-<project-id>/<path>#<generation> gs://on
   reaching this within 30s (6 × 5s, `infra/cloudrun.tf`) — check logs for a
   crash on boot (usually a bad `DB_PASSWORD`/`JWT_SECRET` or an unreachable
   Cloud SQL instance).
+- **"Internal server error" from any NCC-backed route** (Customer Messages,
+  `/ncc-config`, `/ncc-debug`), or NCC's inbound on-call lookup
+  (`GET /organizations/:orgId/on-call`) unexpectedly 500ing instead of its
+  normal 401/403: check the Cloud Logging error for `NCC_CREDENTIALS_
+  ENCRYPTION_KEY is not configured` or `NCC_API_KEY is not configured`.
+  Both were, until 2026-09-03, set by hand directly on the Cloud Run
+  service (`gcloud run services update --set-env-vars`) rather than
+  through Terraform — invisible to `infra/cloudrun.tf`, so a plain
+  `terraform apply` silently wiped both on the next run (`google_cloud_run_
+  v2_service` manages its whole `env` list, not just the entries it knows
+  about). Root-caused live on `test` this way. **Fixed the same day**:
+  both are now first-class Terraform variables
+  (`TF_VAR_ncc_credentials_encryption_key`/`TF_VAR_ncc_api_key`,
+  `infra/variables.tf`/`secrets.tf`) — an environment that already has
+  these needs them set once on the next `apply` (recover the exact
+  existing value from a still-live prior Cloud Run revision if it isn't
+  saved anywhere, per the recovery steps below — regenerating
+  `ncc_credentials_encryption_key` instead of reusing the original value
+  permanently breaks decryption of every already-stored NCC credential)
+  and every apply after keeps them automatically.
+  - **Recovery if a value was already wiped**: find a revision from before
+    the offending `apply` — `gcloud run revisions list
+    --service=oncall-pro-<env>-api --region us-central1 --project
+    <project-id> --format='table(metadata.name,metadata.creationTimestamp)'
+    --sort-by=~metadata.creationTimestamp` — then `gcloud run revisions
+    describe <revision> --region us-central1 --project <project-id>
+    --format=yaml | grep -A1 "name: NCC_CREDENTIALS_ENCRYPTION_KEY"` (or
+    `NCC_API_KEY`) to read the value straight off that revision's spec.
+    Cloud Run keeps old revisions around even once they stop serving
+    traffic, so this works as long as the revision hasn't been explicitly
+    deleted. Restore it immediately with `gcloud run services update
+    oncall-pro-<env>-api --project <project-id> --region us-central1
+    --update-env-vars "NCC_CREDENTIALS_ENCRYPTION_KEY=<value>"
+    --no-invoker-iam-check --quiet` to unblock right away, then set
+    `TF_VAR_ncc_credentials_encryption_key` to the same value before the
+    next `terraform apply` so it stops being a manually-set, wipeable env
+    var for good.
 - **"Failed to fetch" in the browser on every API call** (login,
   forgot-password, anything — not one specific route): before suspecting the
   app, check `CORS_ORIGIN` on that environment's `-api` service —
