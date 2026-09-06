@@ -248,6 +248,76 @@ gsutil cp gs://oncall-pro-prod-branding-<project-id>/<path>#<generation> gs://on
   reaching this within 30s (6 × 5s, `infra/cloudrun.tf`) — check logs for a
   crash on boot (usually a bad `DB_PASSWORD`/`JWT_SECRET` or an unreachable
   Cloud SQL instance).
+- **"Internal server error" from any NCC-backed route** (Customer Messages,
+  `/ncc-config`, `/ncc-debug`), or NCC's inbound on-call lookup
+  (`GET /organizations/:orgId/on-call`) unexpectedly 500ing instead of its
+  normal 401/403: check the Cloud Logging error for `NCC_CREDENTIALS_
+  ENCRYPTION_KEY is not configured` or `NCC_API_KEY is not configured`.
+  Both were, until 2026-09-03, set by hand directly on the Cloud Run
+  service (`gcloud run services update --set-env-vars`) rather than
+  through Terraform — invisible to `infra/cloudrun.tf`, so a plain
+  `terraform apply` silently wiped both on the next run (`google_cloud_run_
+  v2_service` manages its whole `env` list, not just the entries it knows
+  about). Root-caused live on `test` this way. **Fixed the same day**:
+  both are now first-class Terraform variables
+  (`TF_VAR_ncc_credentials_encryption_key`/`TF_VAR_ncc_api_key`,
+  `infra/variables.tf`/`secrets.tf`) — an environment that already has
+  these needs them set once on the next `apply` (recover the exact
+  existing value from a still-live prior Cloud Run revision if it isn't
+  saved anywhere, per the recovery steps below — regenerating
+  `ncc_credentials_encryption_key` instead of reusing the original value
+  permanently breaks decryption of every already-stored NCC credential)
+  and every apply after keeps them automatically.
+  - **Recovery if a value was already wiped**: find a revision from before
+    the offending `apply` — `gcloud run revisions list
+    --service=oncall-pro-<env>-api --region us-central1 --project
+    <project-id> --format='table(metadata.name,metadata.creationTimestamp)'
+    --sort-by=~metadata.creationTimestamp` — then `gcloud run revisions
+    describe <revision> --region us-central1 --project <project-id>
+    --format=yaml | grep -A1 "name: NCC_CREDENTIALS_ENCRYPTION_KEY"` (or
+    `NCC_API_KEY`) to read the value straight off that revision's spec.
+    Cloud Run keeps old revisions around even once they stop serving
+    traffic, so this works as long as the revision hasn't been explicitly
+    deleted. Restore it immediately with `gcloud run services update
+    oncall-pro-<env>-api --project <project-id> --region us-central1
+    --update-env-vars "NCC_CREDENTIALS_ENCRYPTION_KEY=<value>"
+    --no-invoker-iam-check --quiet` to unblock right away, then set
+    `TF_VAR_ncc_credentials_encryption_key` to the same value before the
+    next `terraform apply` so it stops being a manually-set, wipeable env
+    var for good.
+- **"Failed to fetch" in the browser on every API call** (login,
+  forgot-password, anything — not one specific route): before suspecting the
+  app, check `CORS_ORIGIN` on that environment's `-api` service —
+  `gcloud run services describe oncall-pro-<env>-api --project <project-id>
+  --region us-central1 --format=yaml | grep -A2 CORS_ORIGIN`. `cors()`
+  (`backend/src/app.js`) does an exact string match against the request's
+  `Origin` header, so this has to be the domain the browser is actually
+  loading the web app from — e.g. `https://test.cloudconsult.technology` —
+  not the `-web` service's own `*.run.app` URL. A mismatch here (confirmed
+  live 2026-09-03 on `test`) makes the browser block every request before
+  it ever reaches the API, which surfaces client-side as a generic "Failed
+  to fetch" with no CORS-specific wording and no failed request even
+  visible in some cases — indistinguishable at a glance from the API being
+  down, so it's easy to spend time chasing a crash that isn't there. Find
+  what domain the environment is actually served from with `gcloud run
+  domain-mappings list --region us-central1 --project <project-id>` (or
+  check `infra/` for a `google_cloud_run_domain_mapping` resource) before
+  setting `CORS_ORIGIN`, rather than assuming the `-web` service's own URL
+  is it. One-off fix: `gcloud run services update oncall-pro-<env>-api
+  --project <project-id> --region us-central1 --update-env-vars
+  "CORS_ORIGIN=https://<actual-domain>" --no-invoker-iam-check --quiet`.
+  **This is a real bug in the deploy pipeline itself, not just a one-time
+  misconfiguration** — both `scripts/deploy.sh` and `cloudbuild.yaml` had
+  (as of 2026-09-03) a "lock CORS down" step that always set `CORS_ORIGIN`
+  to the `-web` service's own URL, unconditionally, on every deploy — so a
+  redeploy of an environment on a custom domain silently reintroduces this
+  exact failure. Fixed the same day: both now respect an optional
+  override (`PUBLIC_WEB_URL` env var for `deploy.sh`, `_PUBLIC_WEB_URL`
+  substitution for `cloudbuild.yaml`) that takes precedence over the
+  `-web` URL when set — set it once per environment with a custom domain
+  (`export PUBLIC_WEB_URL=https://test.cloudconsult.technology` before
+  running `deploy.sh test`, or the equivalent trigger substitution for
+  Cloud Build) and every future deploy keeps CORS correct automatically.
 - **Email not sending**: check `SMTP_HOST` is actually set for this
   environment (`infra/envs/prod.tfvars` doesn't have it yet — see "Outbound
   email (SendGrid)" below) — if unset, invites/resets are silently only
@@ -256,6 +326,15 @@ gsutil cp gs://oncall-pro-prod-branding-<project-id>/<path>#<generation> gs://on
   `SMTP_HOST` is set but mail still isn't arriving, check SendGrid's
   Activity feed for bounces/blocks (often an unauthenticated sending
   domain) before assuming it's an app bug.
+- **Locked out of an existing account, and the forgot-password flow isn't
+  usable** (SMTP unset per the note above, or you just don't want to wait
+  on it): `./scripts/reset-password.sh <instance-connection-name> <email>
+  <new-password>` sets a new password directly against the deployed DB via
+  the Cloud SQL Auth Proxy — same pattern as `seed-admin.sh`, but updates
+  an existing person instead of only creating new ones (`seed-admin.sh`
+  silently skips if the email already exists). Also clears any account
+  lockout (`failed_login_attempts`/`locked_until`) so the reset account
+  can actually log in.
 
 ## Scaling & cost knobs
 

@@ -92,6 +92,37 @@ variable "smtp_password" {
   default     = ""
 }
 
+# ncc_credentials_encryption_key/ncc_api_key were previously set by hand
+# directly on the Cloud Run service (gcloud run services update
+# --set-env-vars), outside Terraform entirely — invisible to this config,
+# so a later `terraform apply` silently wiped both, since
+# google_cloud_run_v2_service manages its whole `env` list, not just the
+# entries it knows about. Root-caused live on `test` 2026-09-03 (a real
+# "Internal server error" from services/ncc-client's decryptSecret failing
+# on the missing key, RUNBOOK.md's Incident response section) — the same
+# gap equally affects ncc_api_key (routes/onCall.js's inbound live-call-
+# path auth, middleware/serviceAuth.js), just not yet observed failing.
+# Both are now first-class Terraform variables so this can't recur; set
+# once via TF_VAR_ncc_credentials_encryption_key/TF_VAR_ncc_api_key (the
+# EXACT existing value, recovered from a still-live prior Cloud Run
+# revision if unknown — generating a new one instead of the original
+# ncc_credentials_encryption_key permanently breaks decryption of every
+# already-stored NCC credential) on the next apply for any environment
+# that has these configured, and every apply after keeps them.
+variable "ncc_credentials_encryption_key" {
+  description = "AES-256 key (base64, 32 raw bytes) for lib/secretsCrypto.js, encrypting stored per-Customer/TAS-wide NCC (Thrio) credentials. Pass via -var or TF_VAR_ncc_credentials_encryption_key; never commit this, and never regenerate it once real credentials have been encrypted with it — that permanently locks those out. Leave unset to skip Secret Manager entry entirely (NCC outbound features return 'not configured')."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "ncc_api_key" {
+  description = "Shared secret NCC/Thrio sends as a service credential on the inbound on-call-lookup endpoint (routes/onCall.js, middleware/serviceAuth.js). Pass via -var or TF_VAR_ncc_api_key; never commit this. Leave unset to skip Secret Manager entry entirely — every service-authenticated request then fails closed with a 500, per serviceAuth.js's own comment, rather than silently accepting unauthenticated calls."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # ── Optional integrations — both features already degrade gracefully in the
 # app when unset (see routes/reportMappings.js, routes/customerMessages.js),
 # so these have no non-empty defaults and are simply omitted from Cloud Run's

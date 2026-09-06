@@ -20,6 +20,11 @@
 #   export TF_VAR_db_password=$(openssl rand -base64 24)
 #   export TF_VAR_jwt_secret=$(openssl rand -base64 48)
 #   export TF_VAR_alert_notification_email=you@example.com
+#   # If this environment is served from a custom domain (a Cloud Run
+#   # domain mapping, e.g. test.cloudconsult.technology) rather than its
+#   # own *.run.app URL, set this too — see the CORS lock-down step below
+#   # for why: root-caused live 2026-09-03, see RUNBOOK.md.
+#   export PUBLIC_WEB_URL=https://test.cloudconsult.technology
 #   ./scripts/deploy.sh test    # or: prod, or a tenant slug like acme-corp
 #
 # "Environment" here is really "instance name" — it selects which
@@ -121,6 +126,19 @@ gcloud run services update "${APP_NAME}-web" \
 # reuses CORS_ORIGIN rather than a second "public web URL" env var), so this
 # step is also what makes the invitation workflow point somewhere real.
 #
+# CORS_ORIGIN has to be the domain the browser actually loads the web app
+# from — cors() (backend/src/app.js) does an exact string match against
+# the Origin header. For an environment served from a custom domain (a
+# Cloud Run domain mapping) rather than its own *.run.app URL, that's NOT
+# $WEB_URL — root-caused live on `test` 2026-09-03 (RUNBOOK.md's Incident
+# response section), where this line had silently locked CORS to the
+# run.app URL while the app was actually served from
+# test.cloudconsult.technology, breaking every API call with a generic
+# "Failed to fetch". PUBLIC_WEB_URL is the opt-in override for that case;
+# it defaults to $WEB_URL so environments with no custom domain mapping
+# keep today's behavior unchanged.
+PUBLIC_URL="${PUBLIC_WEB_URL:-$WEB_URL}"
+#
 # --no-invoker-iam-check is re-specified here (not just relied on from the
 # earlier update above) because it does not reliably persist across a
 # subsequent `gcloud run services update` call that doesn't repeat it —
@@ -128,10 +146,10 @@ gcloud run services update "${APP_NAME}-web" \
 # silently reverts to requiring auth (manifests as a 404, not 403, for
 # unauthenticated requests — Cloud Run doesn't reveal that the service
 # exists to unauthorized callers).
-echo "==> Restricting API CORS to $WEB_URL"
+echo "==> Restricting API CORS to $PUBLIC_URL"
 gcloud run services update "${APP_NAME}-api" \
   --project "$PROJECT_ID" --region "$REGION" \
-  --update-env-vars "CORS_ORIGIN=$WEB_URL" \
+  --update-env-vars "CORS_ORIGIN=$PUBLIC_URL" \
   --no-invoker-iam-check --quiet
 
 # ── Migrations ──────────────────────────────────────────────────────────

@@ -98,7 +98,12 @@ steps:
   # Twin of the equivalent step in scripts/deploy.sh — see its comment for
   # why --no-invoker-iam-check is re-specified here too (it does not
   # reliably persist across a subsequent `gcloud run services update` call
-  # that doesn't repeat it).
+  # that doesn't repeat it), and for why $$WEB_URL alone is wrong for an
+  # environment served from a custom domain (root-caused live on `test`
+  # 2026-09-03, RUNBOOK.md's Incident response section) — _PUBLIC_WEB_URL
+  # is that same opt-in override, set in the trigger config for any
+  # environment with a domain mapping; empty here means "use $$WEB_URL",
+  # unchanged from before.
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: bash
     args:
@@ -106,10 +111,17 @@ steps:
       - |
         set -euo pipefail
         WEB_URL=$(gcloud run services describe "${_APP_NAME}-web" --region="${_REGION}" --format='value(status.url)')
-        echo "==> Restricting API CORS to $$WEB_URL"
+        # ${_PUBLIC_WEB_URL} is substituted by Cloud Build itself before bash
+        # ever sees this script, so the fallback below has to be plain bash
+        # (:-) applied to the already-substituted value, not mixed into one
+        # Cloud-Build-substitution token — Cloud Build doesn't parse bash
+        # syntax inside ${_VAR}.
+        CONFIGURED_PUBLIC_URL='${_PUBLIC_WEB_URL}'
+        PUBLIC_URL="${CONFIGURED_PUBLIC_URL:-$$WEB_URL}"
+        echo "==> Restricting API CORS to $$PUBLIC_URL"
         gcloud run services update "${_APP_NAME}-api" \
           --region="${_REGION}" \
-          --update-env-vars "CORS_ORIGIN=$$WEB_URL" \
+          --update-env-vars "CORS_ORIGIN=$$PUBLIC_URL" \
           --no-invoker-iam-check --quiet
     id: lock-cors
     waitFor: ['invoker-check-api', 'invoker-check-web']
@@ -118,6 +130,7 @@ substitutions:
   _REGION: us-central1
   _APP_NAME: oncall-pro
   _API_URL: '' # set this in the trigger config to your deployed API URL
+  _PUBLIC_WEB_URL: '' # set this in the trigger config if served from a custom domain (e.g. test.cloudconsult.technology) rather than the -web service's own *.run.app URL
 
 images:
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_APP_NAME}-images/api:${SHORT_SHA}'

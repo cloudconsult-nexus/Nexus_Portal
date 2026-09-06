@@ -46,6 +46,20 @@ resource "google_secret_manager_secret_iam_member" "api_customer_messaging_sso_s
   member    = "serviceAccount:${google_service_account.api_runtime.email}"
 }
 
+resource "google_secret_manager_secret_iam_member" "api_ncc_credentials_encryption_key" {
+  count     = var.ncc_credentials_encryption_key != "" ? 1 : 0
+  secret_id = google_secret_manager_secret.ncc_credentials_encryption_key[0].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.api_runtime.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "api_ncc_api_key" {
+  count     = var.ncc_api_key != "" ? 1 : 0
+  secret_id = google_secret_manager_secret.ncc_api_key[0].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.api_runtime.email}"
+}
+
 # Branding logo uploads — scoped to just the branding bucket, not project-wide
 # storage access.
 resource "google_storage_bucket_iam_member" "api_branding_write" {

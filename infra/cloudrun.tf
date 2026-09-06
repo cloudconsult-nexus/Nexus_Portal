@@ -158,6 +158,35 @@ resource "google_cloud_run_v2_service" "api" {
           }
         }
       }
+      # See variables.tf's comment on ncc_credentials_encryption_key/
+      # ncc_api_key for why these two are here at all — both were
+      # previously set by hand outside Terraform, invisible to this
+      # config, and got silently wiped by a plain `terraform apply`
+      # (root-caused live on `test` 2026-09-03).
+      dynamic "env" {
+        for_each = var.ncc_credentials_encryption_key != "" ? [1] : []
+        content {
+          name = "NCC_CREDENTIALS_ENCRYPTION_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.ncc_credentials_encryption_key[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+      dynamic "env" {
+        for_each = var.ncc_api_key != "" ? [1] : []
+        content {
+          name = "NCC_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.ncc_api_key[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
 
       resources {
         limits = {

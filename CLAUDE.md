@@ -99,11 +99,14 @@ changes across phases 2-4.
        auth, since extended to also accept a human session (see "What
        already lines up well" is unaffected; this is a separate change,
        2026-08-24).
-     - *Outbound* (Portal calling out to NCC) — **fetch/write layer done,
-       2026-08-24, STILL NOT LIVE-VERIFIED against the real Thrio API**
-       (Patrick answered our open questions the same day, 2026-08-24, but
-       actually exercising the API needs Tom's own login working first —
-       see below).
+     - *Outbound* (Portal calling out to NCC) — fetch/write layer done
+       2026-08-24, **live-verified against the real Thrio API 2026-09-02/03**
+       (see `NCCMessageIntegrationGuide.docx`'s first-time validation
+       walkthrough) — real payload shapes confirmed, including that the
+       message envelope carries full free-text content (names, lease
+       terms, legal/financial detail in the live data seen), and a real
+       bug fixed: `http.js` now handles `location` coming back as a full
+       URL rather than a bare hostname.
        `backend/src/services/ncc-client` — auth (per-tenant Basic-auth
        token-with-authorities, reactive 401 refresh), messages (list/by-
        customer/by-id/update-last-follow-up/acknowledge), customers
@@ -142,12 +145,32 @@ changes across phases 2-4.
          tenant's admin login at `tom@amiovox.ai`, but a password reset
          still needs to happen before that login actually works — nothing
          has run against the live API yet because of this.
-     - Consuming this in a real Customer Messages/Secure Messaging UI, and
-       wiring `pushOrganizationToNcc` into Customer creation, are explicitly
-       deferred — see `services/ncc-client/index.js`'s comment on why the
-       push stayed a manual/debug action for now.
-   - 5.2 (messages/PHI **UI/data model** — the outbound fetch layer above
-     is the connectivity this will consume), 5.3 (reports), 5.5 (in-app
+     - Wiring `pushOrganizationToNcc` into Customer creation is still
+       explicitly deferred — see `services/ncc-client/index.js`'s comment
+       on why the push stayed a manual/debug action for now.
+   - **5.2 (Customer Messages UI) — first slice done, 2026-09-03.** Scoped
+     via a Q&A session against `NCCMessageIntegrationGuide.docx` before any
+     code was written (per this file's own "confirm scope/priority before
+     implementing" convention): Customer Messages only this round (Secure
+     Messaging's own data source still isn't scoped); the compliance gate
+     for viewing full content stayed an explicit placeholder (mechanism
+     still TBD — role flag vs re-auth vs consent, see Target spec below);
+     the list/detail layout is designed to work the same across desktop
+     and mobile rather than picking one breakpoint.
+     `frontend/src/pages/CustomerMessages.jsx` — a per-Customer metadata
+     table (contact, priority, created, last follow-up, acknowledged state)
+     with acknowledge/update-follow-up actions, opening a detail panel
+     (full-screen below `sm`, a right-hand panel above it) that renders
+     only metadata — the "view full content" action is visibly present but
+     disabled, since the secure-iframe-into-NCC target and its compliance
+     gate are still open decisions, not something to guess at in this
+     pass. Backend: `routes/customerMessages.js`'s new `/ncc/*` sub-router,
+     open to Customer Admin+ (not Global-Admin-only like `/ncc-debug`),
+     scoped via `resolveScopedOrgIds` per-request rather than trusting a
+     client-supplied `organizationId`, and stripping NCC's `message` field
+     at the one seam every response passes through — this is the real
+     enforcement of "the Portal never persists/displays message content,"
+     not just a client-side convention. 5.3 (reports), 5.5 (in-app
      onboarding wizard) — not started.
 
 ## Target spec: TAS Client Portal
