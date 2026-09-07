@@ -9,6 +9,7 @@ import { auditContext } from '../middleware/audit.js';
 import { assetKey, uploadAsset, resolveAssetUrl } from '../lib/storage.js';
 import { createInvitation, revokePendingForPerson } from '../lib/invitations.js';
 import { resolveScopedOrgIds, getHierarchyTreeIds } from '../lib/orgScope.js';
+import { normalizePhone } from '../lib/phone.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -103,7 +104,10 @@ router.post('/', requireRole('customer_admin'), async (req, res) => {
   const { rows } = await pool.query(
     `INSERT INTO people (organization_id, name, email, primary_phone, sms_phone, secondary_phone, department, job_title, role, can_edit_schedule, password_hash, login_enabled)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
-    [input.organizationId, input.name, input.email || null, input.primaryPhone || null, input.smsPhone || null,
+    // Primary/SMS phone normalized to bare 10 digits at write time (NCC dev
+    // plan, Phase A2) — secondary phone isn't part of that ask and is left
+    // as entered.
+    [input.organizationId, input.name, input.email || null, normalizePhone(input.primaryPhone) || null, normalizePhone(input.smsPhone) || null,
      input.secondaryPhone || null, input.department || null, input.jobTitle || null, input.role, input.canEditSchedule,
      passwordHash, !!input.password]
   );
@@ -139,6 +143,9 @@ router.put('/:id', requireRole('customer_admin'), async (req, res) => {
   if (!scopeAllows(scopedIds, existing.organization_id)) return res.status(403).json({ error: 'Insufficient permissions' });
 
   const fields = ['name', 'email', 'primary_phone', 'sms_phone', 'secondary_phone', 'department', 'job_title', 'is_active', 'can_edit_schedule'];
+  // Primary/SMS phone normalized to bare 10 digits at write time (NCC dev
+  // plan, Phase A2) — secondary phone isn't part of that ask.
+  const PHONE_NORMALIZED_FIELDS = new Set(['primary_phone', 'sms_phone']);
   const updates = [];
   const values = [];
   let i = 1;
@@ -146,7 +153,7 @@ router.put('/:id', requireRole('customer_admin'), async (req, res) => {
     const camel = field.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
     if (req.body[camel] !== undefined) {
       updates.push(`${field} = $${i++}`);
-      values.push(req.body[camel]);
+      values.push(PHONE_NORMALIZED_FIELDS.has(field) ? normalizePhone(req.body[camel]) : req.body[camel]);
     }
   }
   // Role changes are audited distinctly (role_change) since they're a

@@ -14,19 +14,33 @@ export function getMessageById(organizationId, messageId) {
   return nccRequest(organizationId, { method: 'GET', path: `${BASE}${encodeURIComponent(messageId)}` });
 }
 
-export function updateMessageLastFollowUp(organizationId, messageId, lastFollowUpEpochMs) {
+// `actor` (Phase D1 of the NCC dev/release plan) carries the real logged-in
+// Nexus Portal user's identity, not the shared NCC service credential's —
+// today's auth is a per-tenant/per-Customer Basic-auth login
+// (services/ncc-client/auth.js), so there's no per-user NCC session to
+// authenticate as. `modifiedBy` here is a BEST-GUESS field name, not one
+// Patrick's team has confirmed accepts/persists — this needs verifying
+// against the live API (or a real field name from Patrick's successor)
+// before relying on NCC's own "modified by" reflecting it. Sent
+// best-effort; omitted entirely if no actor is given, so it can't break a
+// call that doesn't need it.
+function actorFields(actor) {
+  return actor?.email || actor?.name ? { modifiedBy: actor.email || actor.name } : {};
+}
+
+export function updateMessageLastFollowUp(organizationId, messageId, lastFollowUpEpochMs, actor) {
   return nccRequest(organizationId, {
     method: 'PATCH',
     path: `${BASE}${encodeURIComponent(messageId)}`,
-    body: { lastFollowUp: lastFollowUpEpochMs },
+    body: { lastFollowUp: lastFollowUpEpochMs, ...actorFields(actor) },
   });
 }
 
-export function acknowledgeMessage(organizationId, messageId, acknowledgedAtEpochMs) {
+export function acknowledgeMessage(organizationId, messageId, acknowledgedAtEpochMs, actor) {
   return nccRequest(organizationId, {
     method: 'PATCH',
     path: `${BASE}${encodeURIComponent(messageId)}`,
-    body: { acknowledged: true, acknowledgedAt: acknowledgedAtEpochMs },
+    body: { acknowledged: true, acknowledgedAt: acknowledgedAtEpochMs, ...actorFields(actor) },
   });
 }
 

@@ -9,6 +9,8 @@ import { getEffectiveBranding } from '../lib/branding.js';
 import { assetKey, uploadAsset, resolveAssetUrl } from '../lib/storage.js';
 import { resolveScopedOrgIds } from '../lib/orgScope.js';
 import { isValidTimeZone } from '../lib/calendarService.js';
+import * as ncc from '../services/ncc-client/index.js';
+import { nccLog } from '../services/ncc-client/logger.js';
 
 // Customers (flat — no more hierarchy levels/parent nesting; see
 // migrations/013_tas_customer_model.sql). Kept on the `organizations`
@@ -76,6 +78,19 @@ router.post('/', requireRole('global_admin'), async (req, res) => {
   const org = rows[0];
 
   await req.logAudit({ action: 'create', entityType: 'organization', entityId: org.id, entityName: org.name, newValues: org });
+
+  // Phase B1 of the NCC dev/release plan — best-effort, non-fatal: an NCC
+  // outage or missing credentials must not block creating the Customer
+  // itself (see services/ncc-client/index.js#pushOrganizationToNcc).
+  if (await ncc.isNccConfigured(org.id)) {
+    try {
+      const pushed = await ncc.pushOrganizationToNcc(org.id);
+      await req.logAudit({ action: 'create', entityType: 'ncc_customer', entityId: org.id, entityName: org.name, newValues: pushed });
+    } catch (err) {
+      nccLog({ event: 'push-customer-on-create-failed', organizationId: org.id, error: err.message });
+    }
+  }
+
   res.status(201).json({ organization: await withResolvedBranding(org) });
 });
 
@@ -140,6 +155,20 @@ router.put('/:id', requireRole('global_admin'), async (req, res) => {
     oldValues: existing,
     newValues: rows[0],
   });
+
+  // Phase B2 — same best-effort, non-fatal treatment as B1 above. Only
+  // worth attempting when a field NCC's Customer record actually carries
+  // (name/phone/address) changed; pushOrganizationUpdateToNcc itself no-ops
+  // if this Customer was never linked to an NCC customer.
+  if (['name', 'phone', 'address'].some((f) => updates.some((u) => u.startsWith(`${f} =`)))) {
+    try {
+      const pushed = await ncc.pushOrganizationUpdateToNcc(req.params.id);
+      if (pushed) await req.logAudit({ action: 'update', entityType: 'ncc_customer', entityId: req.params.id, entityName: rows[0].name, newValues: pushed });
+    } catch (err) {
+      nccLog({ event: 'push-customer-on-update-failed', organizationId: req.params.id, error: err.message });
+    }
+  }
+
   res.json({ organization: await withResolvedBranding(rows[0]) });
 });
 
