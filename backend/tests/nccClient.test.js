@@ -290,6 +290,113 @@ describe('customers operations — request shapes, incl. the addresss misspellin
     await ncc.getCustomerById(org.id, 'ncc-cust-1');
     expect(new URL(fetchMock.mock.calls[1][0]).pathname).toBe('/data/api/types/customer/ncc-cust-1');
   });
+
+  // Phase B2 of the NCC dev/release plan.
+  it('updateCustomer PATCHes the /{id} path with only the given fields, translating address', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { id: 'ncc-cust-1' }));
+    await ncc.updateCustomer(org.id, 'ncc-cust-1', { name: 'Acme Renamed', address: '456 Oak St' });
+    const [url, opts] = fetchMock.mock.calls[1];
+    expect(new URL(url).pathname).toBe('/data/api/types/customer/ncc-cust-1');
+    expect(opts.method).toBe('PATCH');
+    const body = JSON.parse(opts.body);
+    expect(body).toEqual({ name: 'Acme Renamed', addresss: '456 Oak St' });
+  });
+});
+
+// Phase A1 of the NCC dev/release plan — Contact is a documented native
+// Thrio platform object (api.thrio.com), unlike Message/Customer.
+describe('contacts operations', () => {
+  it('getContactById hits the /{id} path', async () => {
+    await upsertOrganizationCredentials(org.id, { username: 'org-user', password: 'org-pass' });
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'tok', location: 'tenant1.thrio.com' }))
+      .mockResolvedValueOnce(jsonResponse(200, { _id: 'contact-1', firstName: 'Paul', lastName: 'Barnes' }));
+    const result = await ncc.getContactById(org.id, 'contact-1');
+    expect(new URL(fetchMock.mock.calls[1][0]).pathname).toBe('/data/api/types/contact/contact-1');
+    expect(result).toMatchObject({ firstName: 'Paul', lastName: 'Barnes' });
+  });
+});
+
+describe('pushOrganizationUpdateToNcc', () => {
+  it('no-ops when the Customer has never been linked to an NCC customer', async () => {
+    // clearOrganizationCredentials (beforeEach) clears creds, not
+    // ncc_customer_id — clear it explicitly since an earlier
+    // pushOrganizationToNcc test in this same file linked this org.
+    await pool.query('UPDATE ncc_org_config SET ncc_customer_id = NULL WHERE organization_id = $1', [org.id]);
+    const result = await ncc.pushOrganizationUpdateToNcc(org.id);
+    expect(result).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('PATCHes the linked NCC customer with the Customer\'s current fields', async () => {
+    await upsertTasCredentials({ username: 'tas-user', password: 'tas-pass' });
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'tok', location: 'tenant1.thrio.com' }))
+      .mockResolvedValueOnce(jsonResponse(201, { _id: 'ncc-cust-42' }));
+    await ncc.pushOrganizationToNcc(org.id);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { _id: 'ncc-cust-42' }));
+    const result = await ncc.pushOrganizationUpdateToNcc(org.id);
+    expect(result.nccCustomerId).toBe('ncc-cust-42');
+    const [url, opts] = fetchMock.mock.calls[2];
+    expect(new URL(url).pathname).toBe('/data/api/types/customer/ncc-cust-42');
+    expect(opts.method).toBe('PATCH');
+  });
+});
+
+// Phase B's schema-extension follow-up
+// (migrations/019_organization_ncc_address_fields.sql): city/state/zip/
+// country/sla_period are now real organizations columns, synced through to
+// NCC's Create/Update Customer alongside name/phone/address.
+describe('pushOrganizationToNcc / pushOrganizationUpdateToNcc — structured address fields', () => {
+  it('includes city/state/zip/country/slaPeriod on create when the Customer has them set', async () => {
+    await pool.query(
+      `UPDATE organizations SET city = $1, state = $2, zip = $3, country = $4, sla_period = $5 WHERE id = $6`,
+      ['Atlanta', 'GA', '30301', 'US', '24h', org.id]
+    );
+    await upsertTasCredentials({ username: 'tas-user', password: 'tas-pass' });
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'tok', location: 'tenant1.thrio.com' }))
+      .mockResolvedValueOnce(jsonResponse(201, { _id: 'ncc-cust-100' }));
+
+    await ncc.pushOrganizationToNcc(org.id);
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(body).toMatchObject({ city: 'Atlanta', state: 'GA', zip: '30301', country: 'US', slaPeriod: '24h' });
+
+    // Same fields carry through to the update push too.
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { _id: 'ncc-cust-100' }));
+    await ncc.pushOrganizationUpdateToNcc(org.id);
+    const updateBody = JSON.parse(fetchMock.mock.calls[2][1].body);
+    expect(updateBody).toMatchObject({ city: 'Atlanta', state: 'GA', zip: '30301', country: 'US', slaPeriod: '24h' });
+
+    await pool.query(
+      `UPDATE organizations SET city = NULL, state = NULL, zip = NULL, country = NULL, sla_period = NULL WHERE id = $1`,
+      [org.id]
+    );
+  });
+});
+
+// Phase D1 — best-effort, unconfirmed actor field on message writes; see
+// services/ncc-client/messages.js's actorFields() comment.
+describe('messages operations — actor pass-through (Phase D1)', () => {
+  beforeEach(async () => {
+    await upsertOrganizationCredentials(org.id, { username: 'org-user', password: 'org-pass' });
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { token: 'tok', location: 'tenant1.thrio.com' }));
+  });
+
+  it('acknowledgeMessage includes modifiedBy when an actor is given', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { _id: 'm1', acknowledged: true }));
+    await ncc.acknowledgeMessage(org.id, 'm1', 123, { name: 'Cody CustomerAdmin', email: 'cody@example.test' });
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(body).toMatchObject({ acknowledged: true, acknowledgedAt: 123, modifiedBy: 'cody@example.test' });
+  });
+
+  it('omits modifiedBy entirely when no actor is given', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { _id: 'm1', acknowledged: true }));
+    await ncc.acknowledgeMessage(org.id, 'm1', 123);
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(body).not.toHaveProperty('modifiedBy');
+  });
 });
 
 describe('pushOrganizationToNcc', () => {

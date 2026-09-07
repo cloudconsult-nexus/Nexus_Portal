@@ -63,7 +63,7 @@ export async function getNccStatus(organizationId) {
   const { rows: orgRows } = await pool.query(
     `SELECT (ncc_username_encrypted IS NOT NULL) AS has_override,
             ncc_location_domain, ncc_customer_id, ncc_last_auth_at, ncc_last_auth_error,
-            ncc_last_token_issued_at, ncc_last_token_expires_at
+            ncc_last_token_issued_at, ncc_last_token_expires_at, message_lookback_days
      FROM ncc_org_config WHERE organization_id = $1`,
     [organizationId]
   );
@@ -87,7 +87,31 @@ export async function getNccStatus(organizationId) {
     lastAuthError: active?.ncc_last_auth_error || null,
     lastTokenIssuedAt: active?.ncc_last_token_issued_at || null,
     lastTokenExpiresAt: active?.ncc_last_token_expires_at || null,
+    messageLookbackDays: org?.message_lookback_days ?? DEFAULT_MESSAGE_LOOKBACK_DAYS,
   };
+}
+
+// Phase E1: a per-Customer trailing-window size (in days) bounding how far
+// back Customer Messages fetches — see migrations/020_ncc_message_lookback.sql.
+// NULL (unset) falls back to this default rather than requiring every
+// Customer to have an explicit value.
+export const DEFAULT_MESSAGE_LOOKBACK_DAYS = 30;
+
+export async function getMessageLookbackDays(organizationId) {
+  const { rows } = await pool.query(
+    'SELECT message_lookback_days FROM ncc_org_config WHERE organization_id = $1',
+    [organizationId]
+  );
+  return rows[0]?.message_lookback_days ?? DEFAULT_MESSAGE_LOOKBACK_DAYS;
+}
+
+export async function setMessageLookbackDays(organizationId, days) {
+  await pool.query(
+    `INSERT INTO ncc_org_config (organization_id, message_lookback_days, updated_at)
+     VALUES ($1, $2, now())
+     ON CONFLICT (organization_id) DO UPDATE SET message_lookback_days = EXCLUDED.message_lookback_days, updated_at = now()`,
+    [organizationId, days]
+  );
 }
 
 export async function upsertOrganizationCredentials(organizationId, { username, password }) {

@@ -4,11 +4,16 @@ import pool from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireRole } from '../middleware/rbac.js';
 import { auditContext } from '../middleware/audit.js';
+import { normalizePhone } from '../lib/phone.js';
 
 const router = Router();
 router.use(requireAuth, auditContext);
 
 const ALLOWED_FIELDS = ['name', 'email', 'primary_phone', 'sms_phone', 'secondary_phone', 'department'];
+// Primary/SMS phone normalized to bare 10 digits at write time (NCC dev
+// plan, Phase A2), same as routes/people.js — this is the other path that
+// writes these columns.
+const PHONE_NORMALIZED_FIELDS = new Set(['primary_phone', 'sms_phone']);
 
 router.get('/', async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM contact_change_requests ORDER BY created_at DESC');
@@ -40,7 +45,9 @@ router.post('/:id/approve', requireRole('customer_admin'), async (req, res) => {
   if (changeRequest.status !== 'pending') return res.status(400).json({ error: 'Request already reviewed' });
 
   const setClauses = Object.keys(changeRequest.proposed_changes).map((field, i) => `${field} = $${i + 2}`);
-  const values = Object.values(changeRequest.proposed_changes);
+  const values = Object.entries(changeRequest.proposed_changes).map(([field, value]) =>
+    PHONE_NORMALIZED_FIELDS.has(field) ? normalizePhone(value) : value
+  );
   await pool.query(
     `UPDATE people SET ${setClauses.join(', ')}, updated_at = now() WHERE id = $1`,
     [changeRequest.person_id, ...values]

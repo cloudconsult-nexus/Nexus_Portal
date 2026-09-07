@@ -32,3 +32,28 @@ export function createCustomer(organizationId, { zip, country, address, city, sl
     body: { zip, country, addresss: address, city, slaPeriod, description, phone, name, state },
   });
 }
+
+// Phase B2 of the NCC dev/release plan: keep the linked NCC Customer in
+// sync with edits made in Nexus Portal. Same addresss/address translation
+// as create/search — only the fields actually passed in are sent, so a
+// partial edit (e.g. just `name`) doesn't clobber fields NCC already has
+// that the Portal doesn't collect yet (city/state/zip/country/slaPeriod/
+// description — see services/ncc-client/index.js#pushOrganizationToNcc).
+export function updateCustomer(organizationId, nccCustomerId, { zip, country, address, city, slaPeriod, description, phone, name, state } = {}) {
+  const body = {};
+  if (zip !== undefined) body.zip = zip;
+  if (country !== undefined) body.country = country;
+  if (address !== undefined) body.addresss = address;
+  if (city !== undefined) body.city = city;
+  if (slaPeriod !== undefined) body.slaPeriod = slaPeriod;
+  if (description !== undefined) body.description = description;
+  if (phone !== undefined) body.phone = phone;
+  if (name !== undefined) body.name = name;
+  if (state !== undefined) body.state = state;
+
+  return nccRequest(organizationId, {
+    method: 'PATCH',
+    path: `${BASE}${encodeURIComponent(nccCustomerId)}`,
+    body,
+  });
+}

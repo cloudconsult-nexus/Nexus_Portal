@@ -145,32 +145,110 @@ changes across phases 2-4.
          tenant's admin login at `tom@amiovox.ai`, but a password reset
          still needs to happen before that login actually works — nothing
          has run against the live API yet because of this.
-     - Wiring `pushOrganizationToNcc` into Customer creation is still
-       explicitly deferred — see `services/ncc-client/index.js`'s comment
-       on why the push stayed a manual/debug action for now.
-   - **5.2 (Customer Messages UI) — first slice done, 2026-09-03.** Scoped
-     via a Q&A session against `NCCMessageIntegrationGuide.docx` before any
-     code was written (per this file's own "confirm scope/priority before
-     implementing" convention): Customer Messages only this round (Secure
-     Messaging's own data source still isn't scoped); the compliance gate
-     for viewing full content stayed an explicit placeholder (mechanism
-     still TBD — role flag vs re-auth vs consent, see Target spec below);
+     - Wiring `pushOrganizationToNcc` into Customer creation stayed
+       deferred through 2026-09-03 — **now wired in, Release 1, 2026-09-07**
+       (see below): both blockers (schema gap, not-yet-live-verified) are
+       resolved, so this is a best-effort side effect of Customer create/
+       update, not a manual-only action anymore (`/ncc-debug`'s manual
+       trigger still exists too, for direct testing).
+   - **NCC dev/release plan, Release 1 shipped 2026-09-07, Release 2 shipped
+     same day** — backlog from a call with Patrick Hoye (Nextiva/NCC) and
+     Steve Newell, 2026-09-04, cross-checked against api.thrio.com; phased
+     A→G, Release 1 = Phase A + B + D1 (Phase C1 folded in too once its
+     compliance-gate question resolved — see below), Release 2 = Phase D2
+     + E1 (see below). Phase F (on-call person resolution) stays blocked on
+     Patrick's side (401/500 on NCC's on-call people API, needs a separate
+     "API key" nobody has clarity on yet); Phase G (recording playback) has
+     no committed date.
+     - **A1** — `services/ncc-client/contacts.js#getContactById` (Contact
+       is a documented native Thrio platform object, unlike Message/
+       Customer) resolves a message's `contactId` to a First+Last display
+       name, composed in `routes/customerMessages.js#resolveContactNames`
+       and surfaced as `contactName` (deduped per request, falls back to
+       the raw id on a lookup failure rather than breaking the list).
+     - **A2** — `lib/phone.js#normalizePhone` strips Primary/SMS phone to a
+       bare 10 digits at write time (`routes/people.js`,
+       `routes/contactChanges.js`'s approve path), retiring the ad-hoc
+       reformatting Patrick had built NCC-side to match callers to people.
+     - **B1/B2** — `pushOrganizationToNcc`/new
+       `pushOrganizationUpdateToNcc` (`services/ncc-client/index.js`) now
+       fire from `routes/organizations.js`'s POST/PUT handlers,
+       best-effort/non-fatal to Customer creation/edit itself. Shipped as a
+       partial sync (name/phone/address only); **schema-extension follow-up
+       done same day** — `organizations` now has real `city`/`state`/`zip`/
+       `country`/`sla_period` columns
+       (`migrations/019_organization_ncc_address_fields.sql`), captured on
+       the Customers page's Details section and synced through by B1/B2
+       too. `description` deliberately stays out of the NCC sync —
+       `organizations.description` is already branding copy, a different
+       meaning than NCC's Customer `description`, so conflating them would
+       be wrong rather than just incomplete; revisit only if NCC's field is
+       specifically needed.
+     - **C1 + the Phase 5.2 compliance-gate decision** — resolved
+       role-based, 2026-09-07: `requireRole('customer_admin')` on
+       `routes/customerMessages.js`'s `/ncc/*` router (already there) IS
+       the gate. `message` is no longer stripped from any response;
+       `CustomerMessages.jsx` renders it directly instead of the old
+       "view full content" disabled placeholder. Still never persisted in
+       the Portal's own database — fetched live on every load, same as
+       before. (No NCC iframe integration, confirmed on the call — fetch-
+       and-render-natively was already the built direction, not a
+       stopgap.)
+     - **D1** — opening a message in `CustomerMessages.jsx` now
+       auto-acknowledges it (an effect on the detail panel, guarded
+       against double-firing) instead of requiring a manual click; the
+       manual button is now a status badge / retry-on-failure only. Real
+       actor identity pass-through to NCC (`modifiedBy` in
+       `services/ncc-client/messages.js#actorFields`) is sent best-effort —
+       NCC auth is still a shared per-Customer/TAS credential
+       (`services/ncc-client/auth.js`), so there's no per-user NCC session;
+       this field name is **unconfirmed** by Patrick's team (he's exiting
+       the account, successor not yet named) and needs verifying against
+       the live API before NCC's own "modified by" can be trusted to
+       reflect it.
+     - **D2** — reuses `audit_logs` rather than a new table: the acknowledge
+       PATCH handler already wrote an audit entry per acknowledge (entity
+       type `ncc_message`, entity name = NCC message id, actor from
+       `req.user`), which is exactly D2's "who + when, independent of NCC
+       state" ask. New `GET /customer-messages/ncc/messages/:messageId/
+       acknowledgment` reads the latest such entry back;
+       `CustomerMessages.jsx`'s detail panel shows it as "Acknowledged by"
+       alongside NCC's own (best-effort/unconfirmed) `acknowledgedAt`.
+     - **E1** — new `ncc_org_config.message_lookback_days`
+       (`migrations/020_ncc_message_lookback.sql`, NULL = the 30-day
+       `DEFAULT_MESSAGE_LOOKBACK_DAYS` in `services/ncc-client/config.js`),
+       set via `PUT /ncc-config/:orgId/message-lookback` (Global Admin,
+       API-only, same tier as NCC credentials). `routes/customerMessages.js`
+       computes a `rangeFrom`/`rangeTo` window from it and sends it as
+       `rangeType=dateRange&rangeFrom=&rangeTo=` on every message fetch
+       (`services/ncc-client/messages.js`) — the real, documented
+       convention Recording search/Workitem History use, but **E2 (whether
+       the message search endpoint itself honors it) is still unconfirmed**
+       by Patrick's team, so this is sent best-effort. A client-side
+       `createdAt` filter backstops the window either way, so the bound
+       holds even if NCC ignores the params. `CustomerMessages.jsx` shows
+       the active window ("Showing the last N days").
+   - **5.2 (Customer Messages UI) — first slice done, 2026-09-03; content
+     un-masked and contact names resolved, Release 1, 2026-09-07; bounded
+     fetch + local ack attribution, Release 2, same day (see above).**
+     Scoped via a Q&A session against `NCCMessageIntegrationGuide.docx`
+     before any code was written (per this file's own "confirm scope/
+     priority before implementing" convention): Customer Messages only
+     this round (Secure Messaging's own data source still isn't scoped);
      the list/detail layout is designed to work the same across desktop
      and mobile rather than picking one breakpoint.
-     `frontend/src/pages/CustomerMessages.jsx` — a per-Customer metadata
-     table (contact, priority, created, last follow-up, acknowledged state)
-     with acknowledge/update-follow-up actions, opening a detail panel
-     (full-screen below `sm`, a right-hand panel above it) that renders
-     only metadata — the "view full content" action is visibly present but
-     disabled, since the secure-iframe-into-NCC target and its compliance
-     gate are still open decisions, not something to guess at in this
-     pass. Backend: `routes/customerMessages.js`'s new `/ncc/*` sub-router,
-     open to Customer Admin+ (not Global-Admin-only like `/ncc-debug`),
-     scoped via `resolveScopedOrgIds` per-request rather than trusting a
-     client-supplied `organizationId`, and stripping NCC's `message` field
-     at the one seam every response passes through — this is the real
-     enforcement of "the Portal never persists/displays message content,"
-     not just a client-side convention. 5.3 (reports), 5.5 (in-app
+     `frontend/src/pages/CustomerMessages.jsx` — a per-Customer table
+     (contact name, priority, created, last follow-up, acknowledged state),
+     bounded to a configurable trailing window (E1) with the active window
+     shown, an update-follow-up action and auto-acknowledge-on-open (D1),
+     opening a detail panel (full-screen below `sm`, a right-hand panel
+     above it) that renders full message content per the role-based
+     compliance-gate decision (C1, above) plus who locally acknowledged it
+     (D2).
+     Backend: `routes/customerMessages.js`'s `/ncc/*` sub-router, open to
+     Customer Admin+ (not Global-Admin-only like `/ncc-debug`), scoped via
+     `resolveScopedOrgIds` per-request rather than trusting a
+     client-supplied `organizationId`. 5.3 (reports), 5.5 (in-app
      onboarding wizard) — not started.
 
 ## Target spec: TAS Client Portal
@@ -214,14 +292,19 @@ already done — Phase 5.1 — kept here for the full original-vs-target picture
   is the inverse of the typical portal-calls-vendor pattern, putting the
   Portal in NCC's live call path. Outbound direction (Portal calling *out*
   to NCC for messages/customers, human-session Basic-auth per Nextiva
-  engineering) has its fetch/write layer built (`services/ncc-client`) but
-  untested against the live API — see Build history.
-- **Messages/recordings/PHI:** not modeled at all currently (Customer
-  Messages/Secure Messaging are nav-only stubs). Target: Portal never persists
-  PHI or recording/message content — only metadata (sender, timestamp,
-  subject/type, read state). Actual content is accessed via a secure iframe into
-  NCC, gated by a per-Customer-configurable compliance check (mechanism TBD:
-  role flag / re-auth / consent).
+  engineering) has its fetch/write layer built (`services/ncc-client`),
+  live-verified 2026-09-02/03 — see Build history.
+- **Messages/recordings/PHI:** Customer Messages (`routes/customerMessages.js`,
+  `frontend/src/pages/CustomerMessages.jsx`) fetches message metadata AND
+  content live from NCC and renders it natively — never persisted in the
+  Portal's own database. **Direction confirmed on the 2026-09-04 NCC
+  dev/release-plan call: no secure-iframe-into-NCC integration** (NCC isn't
+  responsive, and embedding Portal content inside NCC was ruled out too) —
+  this replaces this section's original secure-iframe design. The
+  compliance gate on viewing content is resolved as role-based (Customer
+  Admin+, 2026-09-07) rather than a role flag / re-auth / consent scheme
+  still TBD. Call recording content (Phase G of that plan) isn't built yet
+  and would follow the same fetch-live-and-render pattern, not an iframe.
 - **Reports:** currently a mix of Portal-native queries (coverage %, workload)
   and a generic `report_mappings` embed-URL system. Target: 100% NCC-executed —
   Portal only links to/embeds NCC/Looker reports, never computes its own. The
