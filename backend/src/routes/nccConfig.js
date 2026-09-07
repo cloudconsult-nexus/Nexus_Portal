@@ -10,6 +10,7 @@ import {
   clearOrganizationCredentials,
   upsertTasCredentials,
   clearTasCredentials,
+  setMessageLookbackDays,
 } from '../services/ncc-client/config.js';
 
 // Credential management for the NCC integration (Phase 5.2 fetch layer).
@@ -46,6 +47,21 @@ router.delete('/:orgId', async (req, res) => {
   await clearOrganizationCredentials(req.params.orgId);
   await req.logAudit({ action: 'delete', entityType: 'ncc_org_config', entityId: req.params.orgId });
   res.status(204).end();
+});
+
+// Phase E1 of the NCC dev/release plan: per-Customer message-fetch lookback
+// window. Kept Global-Admin-only/API-only, same tier as the credential
+// management above — no dedicated UI yet, same as the rest of this file.
+const lookbackSchema = z.object({ days: z.number().int().min(1).max(3650) });
+
+router.put('/:orgId/message-lookback', async (req, res) => {
+  const { rows } = await pool.query('SELECT id FROM organizations WHERE id = $1 AND is_deleted = false', [req.params.orgId]);
+  if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+
+  const { days } = lookbackSchema.parse(req.body);
+  await setMessageLookbackDays(req.params.orgId, days);
+  await req.logAudit({ action: 'update', entityType: 'ncc_org_config', entityId: req.params.orgId, newValues: { messageLookbackDays: days } });
+  res.json(await getNccStatus(req.params.orgId));
 });
 
 // TAS-wide default tenant — the common case per migrations/018's fallback

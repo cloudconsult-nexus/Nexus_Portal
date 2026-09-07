@@ -151,16 +151,15 @@ changes across phases 2-4.
        resolved, so this is a best-effort side effect of Customer create/
        update, not a manual-only action anymore (`/ncc-debug`'s manual
        trigger still exists too, for direct testing).
-   - **NCC dev/release plan, Release 1 shipped 2026-09-07** — backlog from
-     a call with Patrick Hoye (Nextiva/NCC) and Steve Newell, 2026-09-04,
-     cross-checked against api.thrio.com; phased A→G, Release 1 = Phase
-     A + B + D1 (Phase C1 folded in too once its compliance-gate question
-     resolved — see below). Phase F (on-call person resolution) stays
-     blocked on Patrick's side (401/500 on NCC's on-call people API, needs
-     a separate "API key" nobody has clarity on yet); Phase E (bounded
-     message fetch/lookback window) and D2 (local ack audit table) are
-     scoped but deferred to Release 2; Phase G (recording playback) has no
-     committed date.
+   - **NCC dev/release plan, Release 1 shipped 2026-09-07, Release 2 shipped
+     same day** — backlog from a call with Patrick Hoye (Nextiva/NCC) and
+     Steve Newell, 2026-09-04, cross-checked against api.thrio.com; phased
+     A→G, Release 1 = Phase A + B + D1 (Phase C1 folded in too once its
+     compliance-gate question resolved — see below), Release 2 = Phase D2
+     + E1 (see below). Phase F (on-call person resolution) stays blocked on
+     Patrick's side (401/500 on NCC's on-call people API, needs a separate
+     "API key" nobody has clarity on yet); Phase G (recording playback) has
+     no committed date.
      - **A1** — `services/ncc-client/contacts.js#getContactById` (Contact
        is a documented native Thrio platform object, unlike Message/
        Customer) resolves a message's `contactId` to a First+Last display
@@ -206,22 +205,46 @@ changes across phases 2-4.
        this field name is **unconfirmed** by Patrick's team (he's exiting
        the account, successor not yet named) and needs verifying against
        the live API before NCC's own "modified by" can be trusted to
-       reflect it. D2 (a local acknowledgment audit table, the durable
-       fallback once real identity matters) is deferred to Release 2.
+       reflect it.
+     - **D2** — reuses `audit_logs` rather than a new table: the acknowledge
+       PATCH handler already wrote an audit entry per acknowledge (entity
+       type `ncc_message`, entity name = NCC message id, actor from
+       `req.user`), which is exactly D2's "who + when, independent of NCC
+       state" ask. New `GET /customer-messages/ncc/messages/:messageId/
+       acknowledgment` reads the latest such entry back;
+       `CustomerMessages.jsx`'s detail panel shows it as "Acknowledged by"
+       alongside NCC's own (best-effort/unconfirmed) `acknowledgedAt`.
+     - **E1** — new `ncc_org_config.message_lookback_days`
+       (`migrations/020_ncc_message_lookback.sql`, NULL = the 30-day
+       `DEFAULT_MESSAGE_LOOKBACK_DAYS` in `services/ncc-client/config.js`),
+       set via `PUT /ncc-config/:orgId/message-lookback` (Global Admin,
+       API-only, same tier as NCC credentials). `routes/customerMessages.js`
+       computes a `rangeFrom`/`rangeTo` window from it and sends it as
+       `rangeType=dateRange&rangeFrom=&rangeTo=` on every message fetch
+       (`services/ncc-client/messages.js`) — the real, documented
+       convention Recording search/Workitem History use, but **E2 (whether
+       the message search endpoint itself honors it) is still unconfirmed**
+       by Patrick's team, so this is sent best-effort. A client-side
+       `createdAt` filter backstops the window either way, so the bound
+       holds even if NCC ignores the params. `CustomerMessages.jsx` shows
+       the active window ("Showing the last N days").
    - **5.2 (Customer Messages UI) — first slice done, 2026-09-03; content
-     un-masked and contact names resolved, Release 1, 2026-09-07 (see
-     above).** Scoped via a Q&A session against
-     `NCCMessageIntegrationGuide.docx` before any code was written (per
-     this file's own "confirm scope/priority before implementing"
-     convention): Customer Messages only this round (Secure Messaging's
-     own data source still isn't scoped); the list/detail layout is
-     designed to work the same across desktop and mobile rather than
-     picking one breakpoint. `frontend/src/pages/CustomerMessages.jsx` — a
-     per-Customer table (contact name, priority, created, last follow-up,
-     acknowledged state) with an update-follow-up action and auto-
-     acknowledge-on-open (D1), opening a detail panel (full-screen below
-     `sm`, a right-hand panel above it) that now renders full message
-     content per the role-based compliance-gate decision (C1, above).
+     un-masked and contact names resolved, Release 1, 2026-09-07; bounded
+     fetch + local ack attribution, Release 2, same day (see above).**
+     Scoped via a Q&A session against `NCCMessageIntegrationGuide.docx`
+     before any code was written (per this file's own "confirm scope/
+     priority before implementing" convention): Customer Messages only
+     this round (Secure Messaging's own data source still isn't scoped);
+     the list/detail layout is designed to work the same across desktop
+     and mobile rather than picking one breakpoint.
+     `frontend/src/pages/CustomerMessages.jsx` — a per-Customer table
+     (contact name, priority, created, last follow-up, acknowledged state),
+     bounded to a configurable trailing window (E1) with the active window
+     shown, an update-follow-up action and auto-acknowledge-on-open (D1),
+     opening a detail panel (full-screen below `sm`, a right-hand panel
+     above it) that renders full message content per the role-based
+     compliance-gate decision (C1, above) plus who locally acknowledged it
+     (D2).
      Backend: `routes/customerMessages.js`'s `/ncc/*` sub-router, open to
      Customer Admin+ (not Global-Admin-only like `/ncc-debug`), scoped via
      `resolveScopedOrgIds` per-request rather than trusting a

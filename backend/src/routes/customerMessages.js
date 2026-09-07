@@ -1,12 +1,14 @@
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
+import pool from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireRole } from '../middleware/rbac.js';
 import { auditContext } from '../middleware/audit.js';
 import { resolveScopedOrgIds } from '../lib/orgScope.js';
 import * as ncc from '../services/ncc-client/index.js';
 import { nccLog } from '../services/ncc-client/logger.js';
+import { getMessageLookbackDays } from '../services/ncc-client/config.js';
 
 // Nav/permission scaffolding only (CLAUDE.md: "do not build a real external
 // integration unless explicitly asked") — no database table backs this.
@@ -135,13 +137,23 @@ nccRouter.get('/messages', async (req, res) => {
     await assertOrgInScope(req, organizationId);
 
     const status = await ncc.getNccStatus(organizationId);
+    // Phase E1: bound the fetch to a trailing window instead of a
+    // Customer's full history — see services/ncc-client/messages.js's
+    // rangeParams() comment on why this is sent best-effort (E2 is still
+    // unconfirmed). rangeFrom/rangeTo below double as the client-side
+    // backstop applied after the fetch, so the bound holds either way.
+    const lookbackDays = await getMessageLookbackDays(organizationId);
+    const rangeTo = Date.now();
+    const rangeFrom = rangeTo - lookbackDays * 24 * 60 * 60 * 1000;
+    const range = { rangeFrom, rangeTo };
+
     let result;
     if (acknowledged === 'false') {
-      result = await ncc.getUnacknowledgedMessages(organizationId, { customerId: status.nccCustomerId || undefined });
+      result = await ncc.getUnacknowledgedMessages(organizationId, { customerId: status.nccCustomerId || undefined, range });
     } else {
       result = status.nccCustomerId
-        ? await ncc.getMessagesByCustomerId(organizationId, status.nccCustomerId)
-        : await ncc.getAllMessages(organizationId);
+        ? await ncc.getMessagesByCustomerId(organizationId, status.nccCustomerId, range)
+        : await ncc.getAllMessages(organizationId, range);
     }
 
     let objects = result?.objects || [];
@@ -150,9 +162,50 @@ nccRouter.get('/messages', async (req, res) => {
     // 2026-08-24 confirmation — see services/ncc-client/messages.js) — so
     // it's applied client-side here rather than trusted on the wire.
     if (acknowledged === 'true') objects = objects.filter((m) => m.acknowledged === true);
+    // Client-side backstop for the lookback window — createdAt is a msec
+    // epoch per the message envelope's existing shape. A message missing
+    // createdAt is kept rather than dropped (better to over- than
+    // under-show while the server-side filter is unconfirmed).
+    objects = objects.filter((m) => !m.createdAt || Number(m.createdAt) >= rangeFrom);
     objects = await resolveContactNames(organizationId, objects);
 
-    res.json({ configured: true, organizationId, nccCustomerId: status.nccCustomerId || null, total: objects.length, messages: objects });
+    res.json({
+      configured: true, organizationId, nccCustomerId: status.nccCustomerId || null,
+      lookbackDays, total: objects.length, messages: objects,
+    });
+  } catch (err) {
+    respondNccError(res, err);
+  }
+});
+
+// Phase D2: NCC's own "acknowledged by"/"modified by" isn't a reliable
+// source of who acknowledged a message once real identity matters — Phase
+// D1's actor pass-through is best-effort/unconfirmed, and NCC auth itself
+// is a shared per-Customer/TAS credential, not a per-user NCC session (see
+// services/ncc-client/messages.js's actorFields() comment). This Customer
+// Messages feature's own audit trail — already recorded on every
+// acknowledge by the PATCH handler below — is the durable, Portal-owned
+// record instead: reused here rather than a new table, since audit_logs
+// already carries exactly what D2 asked for (who + when, independent of
+// NCC state, queryable months later).
+nccRouter.get('/messages/:messageId/acknowledgment', async (req, res) => {
+  try {
+    const { organizationId } = z.object({ organizationId: z.string().min(1) }).parse(req.query);
+    await assertOrgInScope(req, organizationId);
+
+    const { rows } = await pool.query(
+      `SELECT user_id, user_email, created_at FROM audit_logs
+       WHERE entity_type = 'ncc_message' AND entity_name = $1 AND organization_id = $2
+         AND action = 'update' AND (new_values->>'acknowledged') = 'true'
+       ORDER BY created_at DESC LIMIT 1`,
+      [req.params.messageId, organizationId]
+    );
+    const row = rows[0];
+    res.json({
+      acknowledgedByUserId: row?.user_id || null,
+      acknowledgedByEmail: row?.user_email || null,
+      acknowledgedAt: row?.created_at || null,
+    });
   } catch (err) {
     respondNccError(res, err);
   }

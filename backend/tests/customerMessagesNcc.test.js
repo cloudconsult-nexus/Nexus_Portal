@@ -103,7 +103,7 @@ describe('/customer-messages/ncc/messages content (un-masked, Phase C1)', () => 
           previous: '0',
           count: 1,
           objects: [
-            { _id: 'm1', messageId: 'm1', objectType: 'message', customerId: 'c1', contactId: 'contact-1', priority: '3', message: 'lease renewal details for unit 4B', acknowledged: false, createdAt: 1 },
+            { _id: 'm1', messageId: 'm1', objectType: 'message', customerId: 'c1', contactId: 'contact-1', priority: '3', message: 'lease renewal details for unit 4B', acknowledged: false, createdAt: Date.now() },
           ],
         })
       )
@@ -153,6 +153,69 @@ describe('/customer-messages/ncc/messages content (un-masked, Phase C1)', () => 
     // along in the body, best-effort/unconfirmed field name.
     const [, patchInit] = fetchMock.mock.calls[1];
     expect(JSON.parse(patchInit.body)).toMatchObject({ modifiedBy: customerAdminA.email });
+  });
+
+  // Phase E1 of the NCC dev/release plan.
+  it('sends a rangeType=dateRange window on the NCC fetch and echoes lookbackDays', async () => {
+    const token = signToken(customerAdminA);
+    await request(app).put(`/ncc-config/${orgA.id}`).set('Authorization', `Bearer ${signToken(globalAdmin)}`).send({ username: 'org-user', password: 'org-pass' });
+
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'tok-1', location: 'tenant1.thrio.com' }))
+      .mockResolvedValueOnce(jsonResponse(200, { next: '0', total: '0', previous: '0', count: 0, objects: [] }));
+
+    const res = await request(app).get(`/customer-messages/ncc/messages?organizationId=${orgA.id}`).set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.lookbackDays).toBe(30); // default — see services/ncc-client/config.js
+
+    const url = new URL(fetchMock.mock.calls[1][0]);
+    expect(url.searchParams.get('rangeType')).toBe('dateRange');
+    const rangeFrom = Number(url.searchParams.get('rangeFrom'));
+    const rangeTo = Number(url.searchParams.get('rangeTo'));
+    expect(rangeTo - rangeFrom).toBeCloseTo(30 * 24 * 60 * 60 * 1000, -3);
+  });
+
+  it('filters out a message older than the lookback window client-side, even if NCC returns it anyway', async () => {
+    const token = signToken(customerAdminA);
+    await request(app).put(`/ncc-config/${orgA.id}`).set('Authorization', `Bearer ${signToken(globalAdmin)}`).send({ username: 'org-user', password: 'org-pass' });
+
+    const oldMessage = { _id: 'old', createdAt: Date.now() - 90 * 24 * 60 * 60 * 1000 }; // 90 days ago
+    const recentMessage = { _id: 'recent', createdAt: Date.now() };
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'tok-1', location: 'tenant1.thrio.com' }))
+      .mockResolvedValueOnce(jsonResponse(200, { objects: [oldMessage, recentMessage] }));
+
+    const res = await request(app).get(`/customer-messages/ncc/messages?organizationId=${orgA.id}`).set('Authorization', `Bearer ${token}`);
+    expect(res.body.messages.map((m) => m._id)).toEqual(['recent']);
+  });
+
+  // Phase D2 of the NCC dev/release plan.
+  it('records and returns who locally acknowledged a message, independent of NCC state', async () => {
+    const adminToken = signToken(globalAdmin);
+    const customerAdminToken = signToken(customerAdminA);
+    await request(app).put(`/ncc-config/${orgA.id}`).set('Authorization', `Bearer ${adminToken}`).send({ username: 'org-user', password: 'org-pass' });
+
+    // Nothing recorded yet for a fresh message id.
+    const before = await request(app)
+      .get(`/customer-messages/ncc/messages/m-d2/acknowledgment?organizationId=${orgA.id}`)
+      .set('Authorization', `Bearer ${customerAdminToken}`);
+    expect(before.status).toBe(200);
+    expect(before.body).toMatchObject({ acknowledgedByUserId: null, acknowledgedByEmail: null, acknowledgedAt: null });
+
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'tok-1', location: 'tenant1.thrio.com' }))
+      .mockResolvedValueOnce(jsonResponse(200, { _id: 'm-d2', acknowledged: true, acknowledgedAt: 123 }));
+    await request(app)
+      .patch(`/customer-messages/ncc/messages/m-d2/acknowledge`)
+      .set('Authorization', `Bearer ${customerAdminToken}`)
+      .send({ organizationId: orgA.id });
+
+    const after = await request(app)
+      .get(`/customer-messages/ncc/messages/m-d2/acknowledgment?organizationId=${orgA.id}`)
+      .set('Authorization', `Bearer ${customerAdminToken}`);
+    expect(after.status).toBe(200);
+    expect(after.body).toMatchObject({ acknowledgedByUserId: customerAdminA.id, acknowledgedByEmail: customerAdminA.email });
+    expect(after.body.acknowledgedAt).toBeTruthy();
   });
 
   it('a Global Admin can read any Customer regardless of scope', async () => {

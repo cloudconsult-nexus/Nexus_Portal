@@ -96,6 +96,31 @@ describe('/ncc-config authorization', () => {
     expect(res.status).toBe(400);
   });
 
+  // Phase E1 of the NCC dev/release plan.
+  it('defaults the message lookback window, and a Global Admin can set it', async () => {
+    const token = signToken(globalAdmin);
+    const before = await request(app).get(`/ncc-config/${org.id}`).set('Authorization', `Bearer ${token}`);
+    expect(before.body.messageLookbackDays).toBe(30);
+
+    const putRes = await request(app)
+      .put(`/ncc-config/${org.id}/message-lookback`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ days: 7 });
+    expect(putRes.status).toBe(200);
+    expect(putRes.body.messageLookbackDays).toBe(7);
+
+    const after = await request(app).get(`/ncc-config/${org.id}`).set('Authorization', `Bearer ${token}`);
+    expect(after.body.messageLookbackDays).toBe(7);
+  });
+
+  it('rejects a Customer Admin setting the message lookback window', async () => {
+    const res = await request(app)
+      .put(`/ncc-config/${org.id}/message-lookback`)
+      .set('Authorization', `Bearer ${signToken(customerAdmin)}`)
+      .send({ days: 7 });
+    expect(res.status).toBe(403);
+  });
+
   it('sets and clears the TAS-wide default', async () => {
     const token = signToken(globalAdmin);
     const putRes = await request(app).put('/ncc-config/tas/default').set('Authorization', `Bearer ${token}`).send({ username: 'tas-user', password: 'tas-pass' });

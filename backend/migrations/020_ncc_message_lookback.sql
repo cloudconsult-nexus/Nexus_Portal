@@ -1,0 +1,13 @@
+-- Phase E1 of the NCC dev/release plan (call with Patrick Hoye and Steve
+-- Newell, 2026-09-04): a per-Customer "message lookback window (days)"
+-- config, so Customer Messages doesn't unconditionally fetch a Customer's
+-- entire NCC message history (some TAS accounts could reach millions of
+-- messages over their lifetime). NULL = use the app-wide default
+-- (services/ncc-client/config.js#DEFAULT_MESSAGE_LOOKBACK_DAYS) rather than
+-- every existing Customer needing a row written on migration.
+--
+-- Lives on ncc_org_config alongside the other per-Customer NCC bookkeeping
+-- (credentials, ncc_customer_id) rather than on organizations — this is
+-- specifically NCC fetch-strategy configuration, not a Customer-record
+-- field of its own.
+ALTER TABLE ncc_org_config ADD COLUMN message_lookback_days INTEGER;

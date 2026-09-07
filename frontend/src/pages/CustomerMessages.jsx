@@ -79,6 +79,11 @@ function AckFilterTabs({ value, onChange }) {
 function MessageDetailPanel({ message, organizationId, onClose, onChanged }) {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  // Phase D2 of the NCC dev/release plan: who actually acknowledged this
+  // message, from the Portal's own audit trail — independent of NCC's own
+  // (best-effort/unconfirmed, see D1) "modified by". null while loading or
+  // if nothing's been recorded yet (e.g. acknowledged before D2 shipped).
+  const [ackRecord, setAckRecord] = useState(null);
   // Guards the auto-acknowledge effect below against firing twice for the
   // same message (StrictMode double-invoke, or a re-render before the
   // first PATCH resolves) — keyed by message id so opening a different
@@ -111,6 +116,20 @@ function MessageDetailPanel({ message, organizationId, onClose, onChanged }) {
     // right after the ack succeeds.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [message.messageId, message._id]);
+
+  // Phase D2: look up the local "who acknowledged" record whenever this
+  // message is (or becomes) acknowledged — including right after the
+  // auto-acknowledge effect above succeeds and flips message.acknowledged.
+  useEffect(() => {
+    const id = message.messageId || message._id;
+    if (!message.acknowledged) { setAckRecord(null); return; }
+    let cancelled = false;
+    api
+      .get(`/customer-messages/ncc/messages/${encodeURIComponent(id)}/acknowledgment?organizationId=${organizationId}`)
+      .then((data) => { if (!cancelled) setAckRecord(data); })
+      .catch(() => { if (!cancelled) setAckRecord(null); });
+    return () => { cancelled = true; };
+  }, [message.messageId, message._id, message.acknowledged, organizationId]);
 
   async function updateFollowUp() {
     setBusy('follow-up');
@@ -153,6 +172,12 @@ function MessageDetailPanel({ message, organizationId, onClose, onChanged }) {
             <div className="flex justify-between gap-4"><dt className="text-muted">Last modified</dt><dd className="text-ink text-right">{formatTimestamp(message.modifiedAt)}</dd></div>
             <div className="flex justify-between gap-4"><dt className="text-muted">Last follow-up</dt><dd className="text-ink text-right">{formatTimestamp(message.lastFollowUp)}</dd></div>
             <div className="flex justify-between gap-4"><dt className="text-muted">Acknowledged at</dt><dd className="text-ink text-right">{formatTimestamp(message.acknowledgedAt)}</dd></div>
+            {message.acknowledged && (
+              <div className="flex justify-between gap-4">
+                <dt className="text-muted">Acknowledged by</dt>
+                <dd className="text-ink text-right">{ackRecord?.acknowledgedByEmail || <span className="text-muted">Not recorded</span>}</dd>
+              </div>
+            )}
           </dl>
 
           {/* Un-masked per Phase C1 of the NCC dev/release plan — see the
@@ -228,6 +253,14 @@ export default function CustomerMessages() {
         </Card>
 
         {error && <ErrorBanner message={error} />}
+
+        {/* Phase E1 of the NCC dev/release plan: the list is bounded to a
+            trailing window (per-Customer configurable, Global Admin only
+            for now — see routes/nccConfig.js) rather than a Customer's
+            full NCC message history. */}
+        {data?.configured && (
+          <p className="text-xs text-muted">Showing the last {data.lookbackDays} days.</p>
+        )}
 
         {!organizationId ? (
           <EmptyState icon={MessageSquare} title="Select a Customer" description="Pick a Customer above to view its NCC messages." />
