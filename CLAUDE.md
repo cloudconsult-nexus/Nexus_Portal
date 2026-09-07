@@ -174,11 +174,17 @@ changes across phases 2-4.
      - **B1/B2** — `pushOrganizationToNcc`/new
        `pushOrganizationUpdateToNcc` (`services/ncc-client/index.js`) now
        fire from `routes/organizations.js`'s POST/PUT handlers,
-       best-effort/non-fatal to Customer creation/edit itself. Still a
-       partial sync (name/phone/address only) — city/state/zip/country/
-       slaPeriod/description stay NCC-side-only, a deliberate scope call
-       rather than extending the Customer schema first (open per Phase B's
-       plan item; revisit if a TAS customer needs it).
+       best-effort/non-fatal to Customer creation/edit itself. Shipped as a
+       partial sync (name/phone/address only); **schema-extension follow-up
+       done same day** — `organizations` now has real `city`/`state`/`zip`/
+       `country`/`sla_period` columns
+       (`migrations/019_organization_ncc_address_fields.sql`), captured on
+       the Customers page's Details section and synced through by B1/B2
+       too. `description` deliberately stays out of the NCC sync —
+       `organizations.description` is already branding copy, a different
+       meaning than NCC's Customer `description`, so conflating them would
+       be wrong rather than just incomplete; revisit only if NCC's field is
+       specifically needed.
      - **C1 + the Phase 5.2 compliance-gate decision** — resolved
        role-based, 2026-09-07: `requireRole('customer_admin')` on
        `routes/customerMessages.js`'s `/ncc/*` router (already there) IS

@@ -37,12 +37,16 @@ export async function isNccConfigured(organizationId) {
 // action (routes/nccDebug.js still exposes it directly for that use) while
 // two blockers held:
 //
-//   1. organizations only has one free-text `address` field; NCC's Create
-//      Customer wants structured city/state/zip/country/slaPeriod, none of
-//      which the Portal collects yet — resolved by shipping a partial sync
-//      (name/phone/address only) rather than extending the Customer schema
-//      first; city/state/zip/country/slaPeriod/description stay NCC-side-
-//      only for now (see the create body below).
+//   1. organizations only had one free-text `address` field; NCC's Create
+//      Customer wants structured city/state/zip/country/slaPeriod — first
+//      resolved by shipping a partial sync (name/phone/address only), then
+//      properly resolved by capturing those as real columns
+//      (migrations/019_organization_ncc_address_fields.sql, Phase B's
+//      schema-extension follow-up) so this can sync the fuller record.
+//      `description` deliberately stays out of this sync — organizations
+//      .description is already used for branding copy, a different meaning
+//      than NCC's Customer description, and conflating the two would be
+//      wrong rather than just incomplete.
 //   2. This push had never run against the live API — resolved: live-
 //      verified 2026-09-02/03 (see CLAUDE.md's Build history).
 //
@@ -51,7 +55,10 @@ export async function isNccConfigured(organizationId) {
 // credential shouldn't block the Portal's own core "create a Customer"
 // flow, which has no NCC dependency of its own.
 export async function pushOrganizationToNcc(organizationId) {
-  const { rows } = await pool.query('SELECT id, name, phone, email, address FROM organizations WHERE id = $1', [organizationId]);
+  const { rows } = await pool.query(
+    'SELECT id, name, phone, email, address, city, state, zip, country, sla_period FROM organizations WHERE id = $1',
+    [organizationId]
+  );
   const org = rows[0];
   if (!org) throw new Error(`Organization ${organizationId} not found`);
 
@@ -59,8 +66,11 @@ export async function pushOrganizationToNcc(organizationId) {
     name: org.name,
     phone: org.phone || undefined,
     address: org.address || undefined,
-    // city/state/zip/country/slaPeriod/description: not yet captured on
-    // organizations — see comment above.
+    city: org.city || undefined,
+    state: org.state || undefined,
+    zip: org.zip || undefined,
+    country: org.country || undefined,
+    slaPeriod: org.sla_period || undefined,
   });
 
   // Field names confirmed by Patrick 2026-08-24 (reply on "NCC Messages/
@@ -93,7 +103,10 @@ export async function pushOrganizationUpdateToNcc(organizationId) {
   const status = await getNccStatus(organizationId);
   if (!status.nccCustomerId) return null;
 
-  const { rows } = await pool.query('SELECT name, phone, address FROM organizations WHERE id = $1', [organizationId]);
+  const { rows } = await pool.query(
+    'SELECT name, phone, address, city, state, zip, country, sla_period FROM organizations WHERE id = $1',
+    [organizationId]
+  );
   const org = rows[0];
   if (!org) throw new Error(`Organization ${organizationId} not found`);
 
@@ -101,6 +114,11 @@ export async function pushOrganizationUpdateToNcc(organizationId) {
     name: org.name,
     phone: org.phone || undefined,
     address: org.address || undefined,
+    city: org.city || undefined,
+    state: org.state || undefined,
+    zip: org.zip || undefined,
+    country: org.country || undefined,
+    slaPeriod: org.sla_period || undefined,
   });
   return { nccCustomerId: status.nccCustomerId, raw: updated };
 }

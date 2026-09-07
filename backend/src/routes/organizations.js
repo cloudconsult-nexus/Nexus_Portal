@@ -128,6 +128,11 @@ router.put('/:id', requireRole('global_admin'), async (req, res) => {
     'call_messages_url', 'logo_url', 'primary_color', 'accent_color', 'name_override',
     'tagline', 'favicon_url', 'description', 'message_html', 'contact_edit_requires_approval',
     'parent_id', 'timezone',
+    // NCC dev/release plan, Phase B's schema-extension follow-up
+    // (migrations/019_organization_ncc_address_fields.sql): structured
+    // address fields NCC's Customer record wants alongside `address`,
+    // so pushOrganizationToNcc/pushOrganizationUpdateToNcc can sync them.
+    'city', 'state', 'zip', 'country', 'sla_period',
   ];
   const updates = [];
   const values = [];
@@ -158,9 +163,10 @@ router.put('/:id', requireRole('global_admin'), async (req, res) => {
 
   // Phase B2 — same best-effort, non-fatal treatment as B1 above. Only
   // worth attempting when a field NCC's Customer record actually carries
-  // (name/phone/address) changed; pushOrganizationUpdateToNcc itself no-ops
-  // if this Customer was never linked to an NCC customer.
-  if (['name', 'phone', 'address'].some((f) => updates.some((u) => u.startsWith(`${f} =`)))) {
+  // changed; pushOrganizationUpdateToNcc itself no-ops if this Customer was
+  // never linked to an NCC customer.
+  const NCC_SYNCED_FIELDS = ['name', 'phone', 'address', 'city', 'state', 'zip', 'country', 'sla_period'];
+  if (NCC_SYNCED_FIELDS.some((f) => updates.some((u) => u.startsWith(`${f} =`)))) {
     try {
       const pushed = await ncc.pushOrganizationUpdateToNcc(req.params.id);
       if (pushed) await req.logAudit({ action: 'update', entityType: 'ncc_customer', entityId: req.params.id, entityName: rows[0].name, newValues: pushed });

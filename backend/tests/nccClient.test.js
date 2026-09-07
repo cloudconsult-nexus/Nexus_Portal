@@ -344,6 +344,38 @@ describe('pushOrganizationUpdateToNcc', () => {
   });
 });
 
+// Phase B's schema-extension follow-up
+// (migrations/019_organization_ncc_address_fields.sql): city/state/zip/
+// country/sla_period are now real organizations columns, synced through to
+// NCC's Create/Update Customer alongside name/phone/address.
+describe('pushOrganizationToNcc / pushOrganizationUpdateToNcc — structured address fields', () => {
+  it('includes city/state/zip/country/slaPeriod on create when the Customer has them set', async () => {
+    await pool.query(
+      `UPDATE organizations SET city = $1, state = $2, zip = $3, country = $4, sla_period = $5 WHERE id = $6`,
+      ['Atlanta', 'GA', '30301', 'US', '24h', org.id]
+    );
+    await upsertTasCredentials({ username: 'tas-user', password: 'tas-pass' });
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'tok', location: 'tenant1.thrio.com' }))
+      .mockResolvedValueOnce(jsonResponse(201, { _id: 'ncc-cust-100' }));
+
+    await ncc.pushOrganizationToNcc(org.id);
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(body).toMatchObject({ city: 'Atlanta', state: 'GA', zip: '30301', country: 'US', slaPeriod: '24h' });
+
+    // Same fields carry through to the update push too.
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { _id: 'ncc-cust-100' }));
+    await ncc.pushOrganizationUpdateToNcc(org.id);
+    const updateBody = JSON.parse(fetchMock.mock.calls[2][1].body);
+    expect(updateBody).toMatchObject({ city: 'Atlanta', state: 'GA', zip: '30301', country: 'US', slaPeriod: '24h' });
+
+    await pool.query(
+      `UPDATE organizations SET city = NULL, state = NULL, zip = NULL, country = NULL, sla_period = NULL WHERE id = $1`,
+      [org.id]
+    );
+  });
+});
+
 // Phase D1 — best-effort, unconfirmed actor field on message writes; see
 // services/ncc-client/messages.js's actorFields() comment.
 describe('messages operations — actor pass-through (Phase D1)', () => {

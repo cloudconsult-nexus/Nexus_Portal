@@ -13,6 +13,7 @@ export const blocks = [
   table(['Field', 'Notes'], [
     ['parent_id', 'Optional — nests this Customer under another for display and roll-up reporting. A Customer can\'t be nested under its own descendant (checked on save).'],
     ['account_number, phone, email, address, website', 'Contact details'],
+    ['city, state, zip, country, sla_period', 'Structured address/SLA fields, edited on the Customers page alongside address — synced to NCC\'s Customer record when this Customer is linked to one'],
     ['contact_edit_requires_approval', 'Whether a User\'s contact-edit requests need Customer Admin approval, or apply directly'],
     ['logo_url, favicon_url, primary_color, accent_color, name_override, tagline, description, message_html', 'Branding — falls back to TAS Settings for any field left unset'],
   ]),

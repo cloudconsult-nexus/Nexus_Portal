@@ -11,7 +11,13 @@ import {
 import LogoUpload from '../components/LogoUpload.jsx';
 import OrganizationSelector from '../components/OrganizationSelector.jsx';
 
-const DETAIL_FIELDS = ['name', 'account_number', 'phone', 'email', 'address', 'website', 'primary_contact', 'call_messages_url'];
+// city/state/zip/country/sla_period (migrations/019_organization_ncc_address_fields.sql):
+// the structured address/SLA fields NCC's Customer record wants alongside
+// `address` — see services/ncc-client/index.js#pushOrganizationToNcc.
+const DETAIL_FIELDS = [
+  'name', 'account_number', 'phone', 'email', 'address', 'city', 'state', 'zip', 'country',
+  'website', 'primary_contact', 'call_messages_url', 'sla_period',
+];
 const BRANDING_FIELDS = ['name_override', 'tagline', 'primary_color', 'accent_color', 'description', 'message_html'];
 
 // Read-only display for a saved record — the modal defaults to this and
@@ -320,6 +326,15 @@ export default function Customers() {
                     <Field label="Primary contact"><Input value={form.primary_contact || ''} onChange={(e) => setForm({ ...form, primary_contact: e.target.value })} /></Field>
                   </div>
                   <Field label="Address"><Input value={form.address || ''} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field label="City"><Input value={form.city || ''} onChange={(e) => setForm({ ...form, city: e.target.value })} /></Field>
+                    <Field label="State"><Input value={form.state || ''} onChange={(e) => setForm({ ...form, state: e.target.value })} /></Field>
+                    <Field label="ZIP"><Input value={form.zip || ''} onChange={(e) => setForm({ ...form, zip: e.target.value })} /></Field>
+                    <Field label="Country"><Input value={form.country || ''} onChange={(e) => setForm({ ...form, country: e.target.value })} /></Field>
+                  </div>
+                  <Field label="SLA period" hint="Passed through to NCC as-is — the Portal doesn't interpret this value.">
+                    <Input value={form.sla_period || ''} onChange={(e) => setForm({ ...form, sla_period: e.target.value })} />
+                  </Field>
                   <Field label="Call messages URL"><Input value={form.call_messages_url || ''} onChange={(e) => setForm({ ...form, call_messages_url: e.target.value })} /></Field>
                   <Field label="Parent customer" hint="Optional — nests this Customer under another for display grouping.">
                     <Select value={form.parent_id || ''} onChange={(e) => setForm({ ...form, parent_id: e.target.value || null })}>
@@ -345,6 +360,13 @@ export default function Customers() {
                     <ReadOnlyField label="Primary contact" value={detail.primary_contact} />
                   </div>
                   <ReadOnlyField label="Address" value={detail.address} />
+                  <div className="grid grid-cols-2 gap-4">
+                    <ReadOnlyField label="City" value={detail.city} />
+                    <ReadOnlyField label="State" value={detail.state} />
+                    <ReadOnlyField label="ZIP" value={detail.zip} />
+                    <ReadOnlyField label="Country" value={detail.country} />
+                  </div>
+                  <ReadOnlyField label="SLA period" value={detail.sla_period} />
                   <ReadOnlyField label="Call messages URL" value={detail.call_messages_url} />
                   <ReadOnlyField label="Parent customer" value={detail.parent_id ? findOrg(orgs, detail.parent_id)?.name : null} />
                   <ReadOnlyField label="Contact edits require approval" value={detail.contact_edit_requires_approval ? 'Yes' : 'No'} />
