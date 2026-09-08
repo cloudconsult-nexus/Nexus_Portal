@@ -32,7 +32,6 @@ system's `read_only` role, the lowest-privilege role in the platform
 | Nexus Portal | Invitations | Global Admin, Organization Admin |
 | Nexus Portal | Bulk Import | Global Admin, Organization Admin |
 | Nexus Portal | Customer Messages | Global Admin, Organization Admin, Technician |
-| Nexus Portal | Secure Messaging | Global Admin, Organization Admin, Technician |
 | Nexus Portal | Reports | Global Admin, Organization Admin |
 | Nexus Portal | Status Alerts | Global Admin, Organization Admin, Scheduler, Technician, Employee (Read Only) |
 | OnCall Pro | Calendars | Global Admin, Organization Admin, Scheduler, Technician, Employee (Read Only) |
@@ -117,7 +116,11 @@ rather than a blanket role check.
 | --- | --- | --- | --- |
 | customer-messages | embed | `GET /customer-messages/embed` | Global Admin, Organization Admin, Technician |
 
-Secure Messaging has no backend endpoint yet — it is nav/permission
-scaffolding only (per project convention), so its access control is only
-enforced at the menu-visibility layer (`messagingOnly`), identical to
-Customer Messages' menu gate.
+Secure Messaging's separate nav container was removed (2026-09-08, per the
+NCC dev/release plan's "one Customer Messages section" decision) — this
+file was hand-edited to drop it rather than regenerated, since
+`backend/tests/support/roleMatrix.js` doesn't currently exist (a
+pre-existing gap — see `backend/tests/support/setupEnv.js`'s comment) and
+`scripts/generate-role-docs.mjs` can't run without it. This file is
+otherwise stale against the current 3-tier role model for the same
+reason; regenerating it properly is a separate cleanup.

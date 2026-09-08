@@ -13,7 +13,6 @@ import Dashboard from './pages/Dashboard.jsx';
 import Customers from './pages/Customers.jsx';
 import People from './pages/People.jsx';
 import CustomerMessages from './pages/CustomerMessages.jsx';
-import SecureMessaging from './pages/SecureMessaging.jsx';
 import NexusReports from './pages/NexusReports.jsx';
 import StatusAlerts from './pages/StatusAlerts.jsx';
 import Calendars from './pages/Calendars.jsx';
@@ -136,7 +135,6 @@ export default function App() {
       <Route path="/invitations" element={<Protected><Invitations /></Protected>} />
       <Route path="/bulk-import" element={<Protected><BulkImport /></Protected>} />
       <Route path="/customer-messages" element={<Protected><CustomerMessages /></Protected>} />
-      <Route path="/secure-messaging" element={<Protected><SecureMessaging /></Protected>} />
       <Route path="/reports" element={<Protected><NexusReports /></Protected>} />
       <Route path="/status-alerts" element={<Protected><StatusAlerts /></Protected>} />
       <Route path="/calendars" element={<Protected><Calendars /></Protected>} />

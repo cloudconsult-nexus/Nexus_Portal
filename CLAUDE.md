@@ -2,8 +2,8 @@
 
 ## What this is
 OnCall Pro is an on-call scheduling application, built as a module inside a broader
-"Nexus Portal" shell (Dashboard, Organizations, Users, Customer Messages, Secure
-Messaging, Reports, Status Alerts). OnCall Pro itself owns Calendars, Schedules,
+"Nexus Portal" shell (Dashboard, Organizations, Users, Customer Messages, Reports,
+Status Alerts). OnCall Pro itself owns Calendars, Schedules,
 Shift Swaps, and OnCall Reports within that shell.
 
 Originally built from an "OnCall Pro Administrator Guide" spec with no prior source
@@ -234,7 +234,8 @@ changes across phases 2-4.
      Scoped via a Q&A session against `NCCMessageIntegrationGuide.docx`
      before any code was written (per this file's own "confirm scope/
      priority before implementing" convention): Customer Messages only
-     this round (Secure Messaging's own data source still isn't scoped);
+     this round — Secure Messaging's own nav container has since been
+     **removed entirely** (2026-09-08, see Working conventions below);
      the list/detail layout is designed to work the same across desktop
      and mobile rather than picking one breakpoint.
      `frontend/src/pages/CustomerMessages.jsx` — a per-Customer table
@@ -330,8 +331,11 @@ should not be attempted as one change.
 ## Working conventions
 - This is pre-launch with no real production data — schema changes don't need a
   migration path unless stated otherwise.
-- Secure Messaging is nav/permission scaffolding only — do not build a real external
-  integration unless explicitly asked.
+- Secure Messaging's separate nav container was removed 2026-09-08 — per the
+  NCC dev/release plan's "drop the separate Secure Messaging container,
+  everything is one Customer Messages section" decision (2026-09-04 call),
+  never actually implemented until now. Don't recreate it; Customer
+  Messages is the one section for this.
 - When touching branding/white-label logic, remember it's node-scoped, not just
   Master Org-scoped.
 - Prefer a "Move" action with a parent picker over drag-and-drop for hierarchy UI.

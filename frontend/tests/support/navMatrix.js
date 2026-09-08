@@ -6,7 +6,7 @@
 // (Phase 5.1 — see CLAUDE.md's "Target spec" section).
 export const ROLE_KEYS = ['global_admin', 'customer_admin', 'user'];
 
-const TOP_NAV_ALL = ['Dashboard', 'Customers', 'People', 'Invitations', 'Bulk Import', 'Customer Messages', 'Secure Messaging', 'Reports', 'Status Alerts'];
+const TOP_NAV_ALL = ['Dashboard', 'Customers', 'People', 'Invitations', 'Bulk Import', 'Customer Messages', 'Reports', 'Status Alerts'];
 const TOP_NAV_USER = ['Dashboard', 'People', 'Status Alerts'];
 
 const ONCALL_NAV_ALL = ['Calendars', 'Schedules', 'Shift Swaps', 'OnCall Reports'];

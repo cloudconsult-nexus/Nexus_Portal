@@ -45,8 +45,11 @@ export function canEditSchedule(user) {
   return isAdmin(user) || !!user?.canEditSchedule;
 }
 
-// Customer Messages / Secure Messaging are nav+permission scaffolding
-// (CLAUDE.md) surfaced to the same audience as other admin tooling.
+// Customer Messages (the real, built NCC integration — Secure Messaging's
+// separate nav container was removed, per the NCC dev/release plan's
+// "drop the separate Secure Messaging container, one Customer Messages
+// section" decision) is surfaced to the same audience as other admin
+// tooling.
 export function canViewMessages(user) {
   return isAdmin(user);
 }

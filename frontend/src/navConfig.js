@@ -1,5 +1,5 @@
 import {
-  LayoutGrid, LayoutDashboard, Building2, Users, Calendar, Grid3x3, MessageSquare, ShieldCheck,
+  LayoutGrid, LayoutDashboard, Building2, Users, Calendar, Grid3x3, MessageSquare,
   ArrowLeftRight, BarChart3, Shield, Settings as SettingsIcon, Radio, Palette, MailPlus, UploadCloud, BookOpen, Building,
 } from 'lucide-react';
 import { isAdmin, isGlobalAdmin, canViewMessages } from './lib/roles.js';
@@ -16,7 +16,6 @@ export const topNav = [
   { to: '/invitations', label: 'Invitations', icon: MailPlus, adminOnly: true },
   { to: '/bulk-import', label: 'Bulk Import', icon: UploadCloud, adminOnly: true },
   { to: '/customer-messages', label: 'Customer Messages', icon: MessageSquare, messagingOnly: true },
-  { to: '/secure-messaging', label: 'Secure Messaging', icon: ShieldCheck, messagingOnly: true },
   { to: '/reports', label: 'Reports', icon: BarChart3, adminOnly: true },
   { to: '/status-alerts', label: 'Status Alerts', icon: Radio },
 ];
