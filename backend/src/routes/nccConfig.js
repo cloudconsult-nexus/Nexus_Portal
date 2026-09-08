@@ -14,11 +14,11 @@ import {
 } from '../services/ncc-client/config.js';
 
 // Credential management for the NCC integration (Phase 5.2 fetch layer).
-// API-only, no frontend yet — Customer Messages/Secure Messaging UI is a
-// later, collaboratively-designed phase (CLAUDE.md/build brief), and this
-// is purely operational configuration, not something end users touch.
-// Global Admin only, same tier as tas-settings and NCC_API_KEY-adjacent
-// config elsewhere in the app.
+// API-only, no frontend — this is purely operational configuration, not
+// something end users touch (the Customer Messages page,
+// frontend/src/pages/CustomerMessages.jsx, is the real end-user feature
+// built on top of it). Global Admin only, same tier as tas-settings and
+// NCC_API_KEY-adjacent config elsewhere in the app.
 //
 // GET never returns a decrypted username/password — only whether NCC is
 // configured and non-secret bookkeeping (location, last auth result). The

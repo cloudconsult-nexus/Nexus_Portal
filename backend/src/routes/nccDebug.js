@@ -7,12 +7,12 @@ import * as ncc from '../services/ncc-client/index.js';
 
 // Minimal internal debug view (build brief: "It's fine to leave the
 // existing 'Not configured' screens as-is, or add a minimal internal
-// debug view to confirm the pipe works") — NOT the Customer Messages/
-// Secure Messaging UI, which is an explicitly out-of-scope follow-up
-// phase designed collaboratively. This exists to let Tom/Patrick exercise
-// every operation against a real Customer's NCC config from Postman/curl
-// (or an internal-only screen later) while validating the adapter, without
-// building product UI for it.
+// debug view to confirm the pipe works") — NOT the Customer Messages UI
+// (routes/customerMessages.js, frontend/src/pages/CustomerMessages.jsx),
+// which is the real, built feature. This exists to let Tom/Patrick
+// exercise every operation against a real Customer's NCC config from
+// Postman/curl while validating the adapter, without going through
+// product UI for it.
 //
 // Global Admin only. Every operation writes to NCC's live data for
 // mutating calls (acknowledge/last-follow-up/create) — this is a real
