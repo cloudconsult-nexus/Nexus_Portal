@@ -2,8 +2,8 @@
 
 ## What this is
 OnCall Pro is an on-call scheduling application, built as a module inside a broader
-"Nexus Portal" shell (Dashboard, Organizations, Users, Customer Messages, Secure
-Messaging, Reports, Status Alerts). OnCall Pro itself owns Calendars, Schedules,
+"Nexus Portal" shell (Dashboard, Organizations, Users, Customer Messages, Reports,
+Status Alerts). OnCall Pro itself owns Calendars, Schedules,
 Shift Swaps, and OnCall Reports within that shell.
 
 Originally built from an "OnCall Pro Administrator Guide" spec with no prior source
